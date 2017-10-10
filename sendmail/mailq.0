@@ -61,6 +61,13 @@ DDEESSCCRRIIPPTTIIOONN
               from, if any.  Moreover, status messages for each recipient  are
               printed if available.
 
+       Several  sendmail.cf  options influence the behavior of the mmaaiillqq util-
+       ity: The number of items printed  per  queue  group  is  restricted  by
+       MMaaxxQQuueeuueeRRuunnSSiizzee  if  that  value is set.  The status character ** is not
+       printed for some values of QQuueeuueeSSoorrttOOrrddeerr,, e.g., filename, random, mod-
+       ification,  and none, unless a --qq option is used to limit the processed
+       jobs.
+
        The mmaaiillqq utility exits 0 on success, and >0 if an error occurs.
 
 SSEEEE AALLSSOO
@@ -71,4 +78,4 @@ HHIISSTTOORRYY
 
 
 
-                         $Date: 2002/06/27 22:47:34 $                 MAILQ(1)
+                         $Date: 2007/03/22 18:21:27 $                 MAILQ(1)

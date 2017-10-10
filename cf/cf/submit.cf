@@ -16,8 +16,8 @@
 #####
 #####		SENDMAIL CONFIGURATION FILE
 #####
-##### built by ca@wiz.smi.sendmail.com on Wed Jan 31 21:15:16 PST 2007
-##### in /extra/home/ca/sm-8.14.0/OpenSource/sendmail-8.14.0/cf/cf
+##### built by ca@nother.smi.sendmail.com on Tue Apr 3 16:32:55 PDT 2007
+##### in /extra/home/ca/sm-8.14.1/OpenSource/sendmail-8.14.1/cf/cf
 ##### using ../ as configuration include directory
 #####
 ######################################################################
@@ -35,7 +35,7 @@
 #####  $Id: no_default_msa.m4,v 8.2 2001/02/14 05:03:22 gshapiro Exp $  #####
 
 
-#####  $Id: proto.m4,v 8.726 2007/01/04 18:27:46 ca Exp $  #####
+#####  $Id: proto.m4,v 8.730 2007/02/01 18:50:03 ca Exp $  #####
 
 # level 10 config file format
 V10/Berkeley
@@ -114,7 +114,7 @@ D{MTAHost}[127.0.0.1]
 
 
 # Configuration version number
-DZ8.14.0/Submit
+DZ8.14.1/Submit
 
 
 ###############
@@ -423,6 +423,9 @@ O DontInitGroups=True
 
 # where do errors that occur when sending errors get sent?
 #O DoubleBounceAddress=postmaster
+
+# issue temporary errors (4xy) instead of permanent errors (5xy)?
+#O SoftBounce=False
 
 # where to save bounces if all else fails
 #O DeadLetterDrop=/var/tmp/dead.letter
