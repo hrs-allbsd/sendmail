@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2002 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 2000-2002, 2004 Sendmail, Inc. and its suppliers.
  *      All rights reserved.
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,10 +13,10 @@
  */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Id: fclose.c,v 1.42 2002/02/01 02:28:00 ca Exp $")
+SM_RCSID("@(#)$Id: fclose.c,v 1.44 2005/06/14 23:07:20 ca Exp $")
 #include <errno.h>
 #include <stdlib.h>
-#include <sys/time.h>
+#include <sm/time.h>
 #include <setjmp.h>
 #include <sm/io.h>
 #include <sm/assert.h>
@@ -26,6 +26,7 @@ SM_RCSID("@(#)$Id: fclose.c,v 1.42 2002/02/01 02:28:00 ca Exp $")
 #include <sm/clock.h>
 #include "local.h"
 
+static void	closealrm __P((int));
 static jmp_buf CloseTimeOut;
 
 /*

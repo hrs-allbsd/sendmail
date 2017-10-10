@@ -1,4 +1,4 @@
-dnl $Id: Makefile.m4,v 8.49.2.1 2002/06/21 21:58:36 ca Exp $
+dnl $Id: Makefile.m4,v 8.51 2004/11/18 22:29:52 ca Exp $
 include(confBUILDTOOLSDIR`/M4/switch.m4')
 
 define(`confREQUIRE_LIBSM', `true')
@@ -8,6 +8,7 @@ PREPENDDEF(`confENVDEF', `confMAPDEF')
 PREPENDDEF(`confINCDIRS', `-I${SMSRCDIR} ')
 
 bldPRODUCT_START(`executable', `mail.local')
+define(`bldINSTALL_DIR', `E')
 define(`bldNO_INSTALL', `true')
 define(`bldSOURCES', `mail.local.c ')
 bldPUSH_SMLIB(`sm')

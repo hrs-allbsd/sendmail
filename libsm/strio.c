@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2002 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 2000-2002, 2004, 2005 Sendmail, Inc. and its suppliers.
  *      All rights reserved.
  * Copyright (c) 1990, 1993
  *	The Regents of the University of California.  All rights reserved.
@@ -13,7 +13,7 @@
  */
 
 #include <sm/gen.h>
-SM_IDSTR(id, "@(#)$Id: strio.c,v 1.42 2002/02/11 23:05:50 gshapiro Exp $")
+SM_IDSTR(id, "@(#)$Id: strio.c,v 1.44 2005/06/09 21:40:19 ca Exp $")
 #include <stdlib.h>
 #include <unistd.h>
 #include <fcntl.h>
@@ -24,6 +24,9 @@ SM_IDSTR(id, "@(#)$Id: strio.c,v 1.42 2002/02/11 23:05:50 gshapiro Exp $")
 #include <sm/heap.h>
 #include <sm/conf.h>
 #include "local.h"
+
+static int	sm_strsetmode __P((SM_FILE_T*, const int *));
+static int	sm_strgetmode __P((SM_FILE_T*, int *));
 
 /*
 **  Cookie structure for the "strio" file type
@@ -313,7 +316,7 @@ sm_strclose(fp)
 **		Failure: -1 and sets errno
 */
 
-int
+static int
 sm_strsetmode(fp, mode)
 	SM_FILE_T *fp;
 	const int *mode;
@@ -356,7 +359,7 @@ sm_strsetmode(fp, mode)
 **		Failure: -1 and sets errno
 */
 
-int
+static int
 sm_strgetmode(fp, mode)
 	SM_FILE_T *fp;
 	int *mode;

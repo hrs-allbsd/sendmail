@@ -9,7 +9,7 @@
  */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Id: sasl.c,v 8.19.2.2 2002/09/26 23:03:40 gshapiro Exp $")
+SM_RCSID("@(#)$Id: sasl.c,v 8.21 2004/11/22 23:09:00 gshapiro Exp $")
 
 #if SASL
 # include <stdlib.h>
@@ -208,7 +208,7 @@ intersect(s1, s2, rpool)
 # if SASL >= 20000
 /*
 **  IPTOSTRING -- create string for SASL_IP*PORT property
-**		  (borrowed from lib/iptostring.c in Cyrus-IMAP)
+**		(borrowed from lib/iptostring.c in Cyrus-IMAP)
 **
 **	Parameters:
 **		addr -- (pointer to) socket address
@@ -226,9 +226,6 @@ intersect(s1, s2, rpool)
 
 #  include <arpa/inet.h>
 
-#  ifndef NI_WITHSCOPEID
-#   define NI_WITHSCOPEID	0
-#  endif
 #  ifndef NI_MAXHOST
 #   define NI_MAXHOST	1025
 #  endif
@@ -244,6 +241,9 @@ iptostring(addr, addrlen, out, outlen)
 	unsigned outlen;
 {
 	char hbuf[NI_MAXHOST], pbuf[NI_MAXSERV];
+#  if NETINET6
+	int niflags;
+#  endif /* NETINET6 */
 
 	if (addr == NULL || out == NULL)
 	{
@@ -252,9 +252,13 @@ iptostring(addr, addrlen, out, outlen)
 	}
 
 #  if NETINET6
+	niflags = (NI_NUMERICHOST | NI_NUMERICSERV);
+#   ifdef NI_WITHSCOPEID
+	if (addr->sa.sa_family == AF_INET6)
+		niflags |= NI_WITHSCOPEID;
+#   endif /* NI_WITHSCOPEID */
 	if (getnameinfo((struct sockaddr *) addr, addrlen,
-			hbuf, sizeof hbuf, pbuf, sizeof pbuf,
-			NI_NUMERICHOST | NI_WITHSCOPEID | NI_NUMERICSERV) != 0)
+			hbuf, sizeof hbuf, pbuf, sizeof pbuf, niflags) != 0)
 		return false;
 #  else /* NETINET6 */
 	if (addr->sa.sa_family != AF_INET)

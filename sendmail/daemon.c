@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2003 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1998-2006 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -13,7 +13,7 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Id: daemon.c,v 8.613.2.20 2003/11/25 19:02:24 ca Exp $")
+SM_RCSID("@(#)$Id: daemon.c,v 8.665 2006/03/02 19:12:00 ca Exp $")
 
 #if defined(SOCK_STREAM) || defined(__GNU_LIBRARY__)
 # define USE_SOCK_STREAM	1
@@ -34,7 +34,7 @@ SM_RCSID("@(#)$Id: daemon.c,v 8.613.2.20 2003/11/25 19:02:24 ca Exp $")
 #  include <openssl/rand.h>
 #endif /* STARTTLS */
 
-#include <sys/time.h>
+#include <sm/time.h>
 
 #if IP_SRCROUTE && NETINET
 # include <netinet/in_systm.h>
@@ -74,19 +74,31 @@ struct daemon
 	char		*d_mflags;	/* flags for use in macro */
 	char		*d_name;	/* user-supplied name */
 #if MILTER
-# if _FFR_MILTER_PERDAEMON
 	char		*d_inputfilterlist;
 	struct milter	*d_inputfilters[MAXFILTERS];
-# endif /* _FFR_MILTER_PERDAEMON */
 #endif /* MILTER */
+#if _FFR_SS_PER_DAEMON
+	int		d_supersafe;
+#endif /* _FFR_SS_PER_DAEMON */
+#if _FFR_DM_PER_DAEMON
+	int		d_dm;	/* DeliveryMode */
+#endif /* _FFR_DM_PER_DAEMON */
 };
 
 typedef struct daemon DAEMON_T;
 
-static void		connecttimeout __P((void));
+#define SAFE_NOTSET	(-1)	/* SuperSafe (per daemon) option not set */
+/* see also sendmail.h: SuperSafe values */
+
+static void		connecttimeout __P((int));
 static int		opendaemonsocket __P((DAEMON_T *, bool));
 static unsigned short	setupdaemon __P((SOCKADDR *));
 static void		getrequests_checkdiskspace __P((ENVELOPE *e));
+static void		setsockaddroptions __P((char *, DAEMON_T *));
+static void		printdaemonflags __P((DAEMON_T *));
+static int		addr_family __P((char *));
+static int		addrcmp __P((struct hostent *, char *, SOCKADDR *));
+static void		authtimeout __P((int));
 
 /*
 **  DAEMON.C -- routines to use when running as a daemon.
@@ -212,7 +224,7 @@ getrequests(e)
 #endif /* XDEBUG */
 
 	/* Add parent process as first item */
-	proc_list_add(CurrentPid, "Sendmail daemon", PROC_DAEMON, 0, -1);
+	proc_list_add(CurrentPid, "Sendmail daemon", PROC_DAEMON, 0, -1, NULL);
 
 	if (tTd(15, 1))
 	{
@@ -280,6 +292,7 @@ getrequests(e)
 
 		/* May have been sleeping above, check again */
 		CHECK_RESTART;
+
 		getrequests_checkdiskspace(e);
 
 #if XDEBUG
@@ -374,8 +387,8 @@ getrequests(e)
 #endif /* _FFR_QUEUE_RUN_PARANOIA */
 			}
 #if _FFR_QUEUE_RUN_PARANOIA
-			else if (QueueIntvl > 0 &&
-				 lastrun + QueueIntvl + 60 < now)
+			else if (CheckQueueRunners > 0 && QueueIntvl > 0 &&
+				 lastrun + QueueIntvl + CheckQueueRunners < now)
 			{
 
 				/*
@@ -490,6 +503,21 @@ getrequests(e)
 		if (t < 0)
 		{
 			errno = save_errno;
+
+			/* let's ignore these temporary errors */
+			if (save_errno == EINTR
+#ifdef EAGAIN
+			    || save_errno == EAGAIN
+#endif /* EAGAIN */
+#ifdef ECONNABORTED
+			    || save_errno == ECONNABORTED
+#endif /* ECONNABORTED */
+#ifdef EWOULDBLOCK
+			    || save_errno == EWOULDBLOCK
+#endif /* EWOULDBLOCK */
+			   )
+				continue;
+
 			syserr("getrequests: accept");
 
 			/* arrange to re-open the socket next time around */
@@ -568,6 +596,16 @@ getrequests(e)
 		}
 
 		/*
+		**  If connection rate is exceeded here, connection shall be
+		**  refused later by a new call after fork() by the
+		**  validate_connection() function. Closing the connection
+		**  at this point violates RFC 2821.
+		**  Do NOT remove this call, its side effects are needed.
+		*/
+
+		connection_rate_check(&RealHostAddr, NULL);
+
+		/*
 		**  Create a subprocess to process the mail.
 		*/
 
@@ -594,13 +632,13 @@ getrequests(e)
 
 #if NAMED_BIND
 		/*
-		**  Update MX records for FallBackMX.
+		**  Update MX records for FallbackMX.
 		**  Let's hope this is fast otherwise we screw up the
 		**  response time.
 		*/
 
-		if (FallBackMX != NULL)
-			(void) getfallbackmxrr(FallBackMX);
+		if (FallbackMX != NULL)
+			(void) getfallbackmxrr(FallbackMX);
 #endif /* NAMED_BIND */
 
 		if (tTd(93, 100))
@@ -655,6 +693,7 @@ getrequests(e)
 			ShutdownRequest = NULL;
 			PendingSignal = 0;
 			CurrentPid = getpid();
+			close_sendmail_pid();
 
 			(void) sm_releasesignal(SIGALRM);
 			(void) sm_releasesignal(SIGCHLD);
@@ -697,7 +736,7 @@ getrequests(e)
 				/* Add control socket process */
 				proc_list_add(CurrentPid,
 					      "console socket child",
-					      PROC_CONTROL_CHILD, 0, -1);
+					      PROC_CONTROL_CHILD, 0, -1, NULL);
 			}
 			else
 			{
@@ -708,10 +747,20 @@ getrequests(e)
 
 				/* Add parent process as first child item */
 				proc_list_add(CurrentPid, "daemon child",
-					      PROC_DAEMON_CHILD, 0, -1);
+					      PROC_DAEMON_CHILD, 0, -1, NULL);
 
 				/* don't schedule queue runs if ETRN */
 				QueueIntvl = 0;
+#if _FFR_SS_PER_DAEMON
+				if (Daemons[curdaemon].d_supersafe !=
+				    SAFE_NOTSET)
+					SuperSafe = Daemons[curdaemon].d_supersafe;
+#endif /* _FFR_SS_PER_DAEMON */
+#if _FFR_DM_PER_DAEMON
+				if (Daemons[curdaemon].d_dm != DM_NOTSET)
+					set_delivery_mode(
+						Daemons[curdaemon].d_dm, e);
+#endif /* _FFR_DM_PER_DAEMON */
 
 				sm_setproctitle(true, e, "startup with %s",
 						anynet_ntoa(&RealHostAddr));
@@ -759,21 +808,23 @@ getrequests(e)
 					h_errno == TRY_AGAIN ? "TEMP" : "FAIL");
 			}
 			else
+			{
 				macdefine(&BlankEnvelope.e_macro, A_PERM,
-					macid("{client_resolve}"), "OK");
+					  macid("{client_resolve}"), "OK");
+			}
 			sm_setproctitle(true, e, "startup with %s", p);
 			markstats(e, NULL, STATS_CONNECT);
 
 			if ((inchannel = sm_io_open(SmFtStdiofd,
 						    SM_TIME_DEFAULT,
 						    (void *) &t,
-						    SM_IO_RDONLY,
+						    SM_IO_RDONLY_B,
 						    NULL)) == NULL ||
 			    (t = dup(t)) < 0 ||
 			    (outchannel = sm_io_open(SmFtStdiofd,
 						     SM_TIME_DEFAULT,
 						     (void *) &t,
-						     SM_IO_WRONLY,
+						     SM_IO_WRONLY_B,
 						     NULL)) == NULL)
 			{
 				syserr("cannot open SMTP server channel, fd=%d",
@@ -856,14 +907,15 @@ getrequests(e)
 		{
 			(void) sm_snprintf(status, sizeof status,
 					   "control socket server child");
-			proc_list_add(pid, status, PROC_CONTROL, 0, -1);
+			proc_list_add(pid, status, PROC_CONTROL, 0, -1, NULL);
 		}
 		else
 		{
 			(void) sm_snprintf(status, sizeof status,
 					   "SMTP server child for %s",
 					   anynet_ntoa(&RealHostAddr));
-			proc_list_add(pid, status, PROC_DAEMON, 0, -1);
+			proc_list_add(pid, status, PROC_DAEMON, 0, -1,
+					&RealHostAddr);
 		}
 		(void) sm_releasesignal(SIGCHLD);
 
@@ -888,7 +940,6 @@ getrequests(e)
 		sm_dprintf("getreq: returning\n");
 
 #if MILTER
-# if _FFR_MILTER_PERDAEMON
 	/* set the filters for this daemon */
 	if (Daemons[curdaemon].d_inputfilterlist != NULL)
 	{
@@ -902,7 +953,6 @@ getrequests(e)
 		if (i < MAXFILTERS)
 			InputFilters[i] = NULL;
 	}
-# endif /* _FFR_MILTER_PERDAEMON */
 #endif /* MILTER */
 	return &Daemons[curdaemon].d_flags;
 }
@@ -1388,7 +1438,7 @@ chkdaemonmodifiers(flag)
 
 static void
 setsockaddroptions(p, d)
-	register char *p;
+	char *p;
 	DAEMON_T *d;
 {
 #if NETISO
@@ -1401,6 +1451,12 @@ setsockaddroptions(p, d)
 	if (d->d_addr.sa.sa_family == AF_UNSPEC)
 		d->d_addr.sa.sa_family = AF_INET;
 #endif /* NETINET */
+#if _FFR_SS_PER_DAEMON
+	d->d_supersafe = SAFE_NOTSET;
+#endif /* _FFR_SS_PER_DAEMON */
+#if _FFR_DM_PER_DAEMON
+	d->d_dm = DM_NOTSET;
+#endif /* _FFR_DM_PER_DAEMON */
 
 	while (p != NULL)
 	{
@@ -1425,6 +1481,28 @@ setsockaddroptions(p, d)
 
 		switch (*f)
 		{
+		  case 'A':		/* address */
+			addr = v;
+			break;
+
+#if _FFR_DM_PER_DAEMON
+		  case 'D':		/* DeliveryMode */
+			switch (*v)
+			{
+			  case SM_QUEUE:
+			  case SM_DEFER:
+			  case SM_DELIVER:
+			  case SM_FORK:
+				d->d_dm = *v;
+				break;
+			  default:
+				syserr("554 5.3.5 Unknown delivery mode %c",
+					*v);
+				break;
+			}
+			break;
+#endif /* _FFR_DM_PER_DAEMON */
+
 		  case 'F':		/* address family */
 			if (isascii(*v) && isdigit(*v))
 				d->d_addr.sa.sa_family = atoi(v);
@@ -1460,21 +1538,11 @@ setsockaddroptions(p, d)
 				       v);
 			break;
 
-		  case 'A':		/* address */
-			addr = v;
-			break;
-
 #if MILTER
-# if _FFR_MILTER_PERDAEMON
 		  case 'I':
 			d->d_inputfilterlist = v;
 			break;
-# endif /* _FFR_MILTER_PERDAEMON */
 #endif /* MILTER */
-
-		  case 'P':		/* port */
-			port = v;
-			break;
 
 		  case 'L':		/* listen queue size */
 			d->d_listenqueue = atoi(v);
@@ -1484,17 +1552,38 @@ setsockaddroptions(p, d)
 			d->d_mflags = getmodifiers(v, d->d_flags);
 			break;
 
-		  case 'S':		/* send buffer size */
-			d->d_tcpsndbufsize = atoi(v);
+		  case 'N':		/* name */
+			d->d_name = v;
+			break;
+
+		  case 'P':		/* port */
+			port = v;
 			break;
 
 		  case 'R':		/* receive buffer size */
 			d->d_tcprcvbufsize = atoi(v);
 			break;
 
-		  case 'N':		/* name */
-			d->d_name = v;
+		  case 'S':		/* send buffer size */
+			d->d_tcpsndbufsize = atoi(v);
 			break;
+
+#if _FFR_SS_PER_DAEMON
+		  case 'T':		/* SuperSafe */
+			if (tolower(*v) == 'i')
+				d->d_supersafe = SAFE_INTERACTIVE;
+			else if (tolower(*v) == 'p')
+# if MILTER
+				d->d_supersafe = SAFE_REALLY_POSTMILTER;
+# else /* MILTER */
+				(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
+					"Warning: SuperSafe=PostMilter requires Milter support (-DMILTER)\n");
+# endif /* MILTER */
+			else
+				d->d_supersafe = atobool(v) ? SAFE_REALLY
+							: SAFE_NO;
+			break;
+#endif /* _FFR_SS_PER_DAEMON */
 
 		  default:
 			syserr("554 5.3.5 PortOptions parameter \"%s\" unknown",
@@ -1711,9 +1800,7 @@ static struct dflags	DaemonFlags[] =
 	{ "IFNHELO",		D_IFNHELO	},
 	{ "FQMAIL",		D_FQMAIL	},
 	{ "FQRCPT",		D_FQRCPT	},
-#if _FFR_SMTP_SSL
 	{ "SMTPS",		D_SMTPS		},
-#endif /* _FFR_SMTP_SSL */
 	{ "UNQUALOK",		D_UNQUALOK	},
 	{ "NOAUTH",		D_NOAUTH	},
 	{ "NOCANON",		D_NOCANON	},
@@ -1738,15 +1825,13 @@ printdaemonflags(d)
 		if (!bitnset(df->d_flag, d->d_flags))
 			continue;
 		if (first)
-			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT, "<%s",
-					     df->d_name);
+			sm_dprintf("<%s", df->d_name);
 		else
-			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT, ",%s",
-					     df->d_name);
+			sm_dprintf(",%s", df->d_name);
 		first = false;
 	}
 	if (!first)
-		(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT, ">");
+		sm_dprintf(">");
 }
 
 bool
@@ -1761,10 +1846,8 @@ setdaemonoptions(p)
 	setsockaddroptions(p, &Daemons[NDaemons]);
 
 #if MILTER
-# if _FFR_MILTER_PERDAEMON
 	if (Daemons[NDaemons].d_inputfilterlist != NULL)
 		Daemons[NDaemons].d_inputfilterlist = newstr(Daemons[NDaemons].d_inputfilterlist);
-# endif /* _FFR_MILTER_PERDAEMON */
 #endif /* MILTER */
 
 	if (Daemons[NDaemons].d_name != NULL)
@@ -1929,7 +2012,6 @@ chkclientmodifiers(flag)
 }
 
 #if MILTER
-# if _FFR_MILTER_PERDAEMON
 /*
 **  SETUP_DAEMON_FILTERS -- Parse per-socket filters
 **
@@ -1961,7 +2043,6 @@ setup_daemon_milters()
 		}
 	}
 }
-# endif /* _FFR_MILTER_PERDAEMON */
 #endif /* MILTER */
 /*
 **  MAKECONNECTION -- make a connection to an SMTP socket on a machine.
@@ -2555,6 +2636,8 @@ gothostent:
 				break;
 #endif /* NETINET6 */
 			}
+			if (tTd(16, 1))
+				sm_dprintf("Connecting to [%s]...\n", anynet_ntoa(&addr));
 			i = connect(s, (struct sockaddr *) &addr, addrlen);
 			save_errno = errno;
 			if (ev != NULL)
@@ -2673,11 +2756,11 @@ nextaddr:
 	mci->mci_out = NULL;
 	if ((mci->mci_out = sm_io_open(SmFtStdiofd, SM_TIME_DEFAULT,
 				       (void *) &s,
-				       SM_IO_WRONLY, NULL)) == NULL ||
+				       SM_IO_WRONLY_B, NULL)) == NULL ||
 	    (s = dup(s)) < 0 ||
 	    (mci->mci_in = sm_io_open(SmFtStdiofd, SM_TIME_DEFAULT,
 				      (void *) &s,
-				      SM_IO_RDONLY, NULL)) == NULL)
+				      SM_IO_RDONLY_B, NULL)) == NULL)
 	{
 		save_errno = errno;
 		syserr("cannot open SMTP client channel, fd=%d", s);
@@ -2746,12 +2829,20 @@ nextaddr:
 		macdefine(&BlankEnvelope.e_macro, A_PERM,
 			macid("{if_family_out}"), NULL);
 	}
+
+#if _FFR_HELONAME
+	/* Use the configured HeloName as appropriate */
+	if (HeloName != NULL && HeloName[0] != '\0')
+		mci->mci_heloname = newstr(HeloName);
+#endif /* _FFR_HELONAME */
+
 	mci_setstat(mci, EX_OK, NULL, NULL);
 	return EX_OK;
 }
 
 static void
-connecttimeout()
+connecttimeout(ignore)
+	int ignore;
 {
 	/*
 	**  NOTE: THIS CAN BE CALLED FROM A SIGNAL HANDLER.  DO NOT ADD
@@ -2795,7 +2886,8 @@ makeconnection_ds(mux_path, mci)
 
 	if (rval != 0)
 	{
-		syserr("makeconnection_ds: unsafe domain socket");
+		syserr("makeconnection_ds: unsafe domain socket %s",
+			mux_path);
 		mci_setstat(mci, EX_TEMPFAIL, "4.3.5", NULL);
 		errno = rval;
 		return EX_TEMPFAIL;
@@ -2807,7 +2899,8 @@ makeconnection_ds(mux_path, mci)
 
 	if (strlen(mux_path) >= sizeof unix_addr.sun_path)
 	{
-		syserr("makeconnection_ds: domain socket name too long");
+		syserr("makeconnection_ds: domain socket name %s too long",
+			mux_path);
 
 		/* XXX why TEMPFAIL but 5.x.y ? */
 		mci_setstat(mci, EX_TEMPFAIL, "5.3.5", NULL);
@@ -2822,7 +2915,8 @@ makeconnection_ds(mux_path, mci)
 	if (sock == -1)
 	{
 		save_errno = errno;
-		syserr("makeconnection_ds: could not create domain socket");
+		syserr("makeconnection_ds: could not create domain socket %s",
+			mux_path);
 		mci_setstat(mci, EX_TEMPFAIL, "4.4.5", NULL);
 		errno = save_errno;
 		return EX_TEMPFAIL;
@@ -2843,11 +2937,11 @@ makeconnection_ds(mux_path, mci)
 	/* connection ok, put it into canonical form */
 	mci->mci_out = NULL;
 	if ((mci->mci_out = sm_io_open(SmFtStdiofd, SM_TIME_DEFAULT,
-				       (void *) &sock, SM_IO_WRONLY, NULL))
+				       (void *) &sock, SM_IO_WRONLY_B, NULL))
 					== NULL
 	    || (sock = dup(sock)) < 0 ||
 	    (mci->mci_in = sm_io_open(SmFtStdiofd, SM_TIME_DEFAULT,
-				      (void *) &sock, SM_IO_RDONLY, NULL))
+				      (void *) &sock, SM_IO_RDONLY_B, NULL))
 					== NULL)
 	{
 		save_errno = errno;
@@ -2891,8 +2985,8 @@ shutdown_daemon()
 	ShutdownRequest = NULL;
 	PendingSignal = 0;
 
-	if (LogLevel > 79)
-		sm_syslog(LOG_DEBUG, CurEnv->e_id, "interrupt (%s)",
+	if (LogLevel > 9)
+		sm_syslog(LOG_INFO, CurEnv->e_id, "stopping daemon, reason=%s",
 			  reason == NULL ? "implicit call" : reason);
 
 	FileName = NULL;
@@ -2964,7 +3058,6 @@ void
 restart_daemon()
 {
 	bool drop;
-	int i;
 	int save_errno;
 	char *reason;
 	sigfunc_t ignore, oalrm, ousr1;
@@ -2996,6 +3089,9 @@ restart_daemon()
 	cleanup_shm(DaemonPid == getpid());
 #endif /* SM_CONF_SHM */
 
+	/* close locked pid file */
+	close_sendmail_pid();
+
 	/*
 	**  Want to drop to the user who started the process in all cases
 	**  *but* when running as "smmsp" for the clientmqueue queue run
@@ -3016,14 +3112,7 @@ restart_daemon()
 		/* NOTREACHED */
 	}
 
-	/* arrange for all the files to be closed */
-	for (i = 3; i < DtableSize; i++)
-	{
-		register int j;
-
-		if ((j = fcntl(i, F_GETFD, 0)) != -1)
-			(void) fcntl(i, F_SETFD, j | FD_CLOEXEC);
-	}
+	sm_close_on_exec(STDERR_FILENO + 1, DtableSize);
 
 	/*
 	**  Need to allow signals before execve() to make them "harmless".
@@ -3236,7 +3325,8 @@ addrcmp(hp, ha, sa)
 static jmp_buf	CtxAuthTimeout;
 
 static void
-authtimeout()
+authtimeout(ignore)
+	int ignore;
 {
 	/*
 	**  NOTE: THIS CAN BE CALLED FROM A SIGNAL HANDLER.  DO NOT ADD
@@ -3340,6 +3430,7 @@ getauthinfo(fd, may_be_forged)
 		hp = sm_gethostbyname(RealHostName, family);
 		if (hp == NULL)
 		{
+			/* XXX: Could be a temporary error on forward lookup */
 			*may_be_forged = true;
 		}
 		else
@@ -3826,7 +3917,7 @@ host_map_lookup(map, name, av, statp)
 			return NULL;
 		if (s->s_namecanon.nc_cname == NULL)
 		{
-			syserr("host_map_lookup(%s): bogus NULL cache entry, errno = %d, h_errno = %d",
+			syserr("host_map_lookup(%s): bogus NULL cache entry, errno=%d, h_errno=%d",
 			       name,
 			       s->s_namecanon.nc_errno,
 			       s->s_namecanon.nc_herrno);

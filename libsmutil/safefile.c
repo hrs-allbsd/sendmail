@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2002 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1998-2004 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -15,7 +15,7 @@
 #include <sm/io.h>
 #include <sm/errstring.h>
 
-SM_RCSID("@(#)$Id: safefile.c,v 8.124 2002/05/24 20:50:15 gshapiro Exp $")
+SM_RCSID("@(#)$Id: safefile.c,v 8.128 2004/09/30 18:15:49 ca Exp $")
 
 
 /*
@@ -304,7 +304,7 @@ safefile(fn, uid, gid, user, flags, mode, st)
 	    bitset(S_IXUSR|S_IXGRP|S_IXOTH, st->st_mode))
 	{
 		if (tTd(44, 4))
-			sm_dprintf("\t[exec bits %lo]\tE_SM_ISEXEC]\n",
+			sm_dprintf("\t[exec bits %lo]\tE_SM_ISEXEC\n",
 				(unsigned long) st->st_mode);
 		return E_SM_ISEXEC;
 	}
@@ -489,6 +489,7 @@ safedirpath(fn, uid, gid, user, flags, level, offset)
 			int linklen;
 			char *target;
 			char buf[MAXPATHLEN];
+			char fullbuf[MAXLINKPATHLEN];
 
 			memset(buf, '\0', sizeof buf);
 			linklen = readlink(s, buf, sizeof buf);
@@ -544,7 +545,6 @@ safedirpath(fn, uid, gid, user, flags, level, offset)
 			else
 			{
 				char *sptr;
-				char fullbuf[MAXLINKPATHLEN];
 
 				sptr = strrchr(s, '/');
 				if (sptr != NULL)
@@ -684,6 +684,9 @@ safeopen(fn, omode, cmode, sff)
 	int cmode;
 	long sff;
 {
+#if !NOFTRUNCATE
+	bool truncate;
+#endif /* !NOFTRUNCATE */
 	int rval;
 	int fd;
 	int smode;
@@ -735,6 +738,12 @@ safeopen(fn, omode, cmode, sff)
 		return -1;
 	}
 
+#if !NOFTRUNCATE
+	truncate = bitset(O_TRUNC, omode);
+	if (truncate)
+		omode &= ~O_TRUNC;
+#endif /* !NOFTRUNCATE */
+
 	fd = dfopen(fn, omode, cmode, sff);
 	if (fd < 0)
 		return fd;
@@ -745,6 +754,22 @@ safeopen(fn, omode, cmode, sff)
 		errno = E_SM_FILECHANGE;
 		return -1;
 	}
+
+#if !NOFTRUNCATE
+	if (truncate &&
+	    ftruncate(fd, (off_t) 0) < 0)
+	{
+		int save_errno;
+
+		save_errno = errno;
+		syserr("554 5.3.0 cannot open: file %s could not be truncated",
+		       fn);
+		(void) close(fd);
+		errno = save_errno;
+		return -1;
+	}
+#endif /* !NOFTRUNCATE */
+
 	return fd;
 }
 /*
@@ -940,6 +965,9 @@ dfopen(filename, omode, cmode, sff)
 			locktype = LOCK_EX;
 		else
 			locktype = LOCK_SH;
+		if (bitset(SFF_NBLOCK, sff))
+			locktype |= LOCK_NB;
+
 		if (!lockfile(fd, filename, NULL, locktype))
 		{
 			int save_errno = errno;

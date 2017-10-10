@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2002 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1999-2002, 2004 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -18,7 +18,7 @@
 */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Id: bf.c,v 8.54.2.3 2003/09/03 19:58:26 ca Exp $")
+SM_RCSID("@(#)$Id: bf.c,v 8.61 2004/08/03 23:59:02 ca Exp $")
 
 #include <sys/types.h>
 #include <sys/stat.h>
@@ -38,6 +38,8 @@ static ssize_t	sm_bfread __P((SM_FILE_T *, char *, size_t));
 static ssize_t	sm_bfwrite __P((SM_FILE_T *, const char *, size_t));
 static off_t	sm_bfseek __P((SM_FILE_T *, off_t, int));
 static int	sm_bfclose __P((SM_FILE_T *));
+static int	sm_bfcommit __P((SM_FILE_T *));
+static int	sm_bftruncate __P((SM_FILE_T *));
 
 static int	sm_bfopen __P((SM_FILE_T *, const void *, int, const void *));
 static int	sm_bfsetinfo __P((SM_FILE_T *, int , void *));
@@ -701,7 +703,8 @@ sm_bfcommit(fp)
 
 		/* Clear umask as bf_filemode are the true perms */
 		omask = umask(0);
-		retval = OPEN(bfp->bf_filename, O_RDWR | O_CREAT | O_EXCL,
+		retval = OPEN(bfp->bf_filename,
+			      O_RDWR | O_CREAT | O_EXCL | QF_O_EXTRA,
 			      bfp->bf_filemode, bfp->bf_flags);
 		save_errno = errno;
 		(void) umask(omask);

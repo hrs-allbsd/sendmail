@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2001 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 2000, 2001, 2003, 2004 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -8,7 +8,7 @@
  */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Id: debug.c,v 1.28 2001/09/25 19:57:05 gshapiro Exp $")
+SM_RCSID("@(#)$Id: debug.c,v 1.30 2004/08/03 20:10:26 ca Exp $")
 
 /*
 **  libsm debugging and tracing
@@ -25,6 +25,9 @@ SM_RCSID("@(#)$Id: debug.c,v 1.28 2001/09/25 19:57:05 gshapiro Exp $")
 #include <sm/string.h>
 #include <sm/varargs.h>
 #include <sm/heap.h>
+
+static void		 sm_debug_reset __P((void));
+static const char	*parse_named_setting_x __P((const char *));
 
 /*
 **  Abstractions for printing trace messages.
@@ -74,6 +77,29 @@ sm_debug_setfile(fp)
 	SM_FILE_T *fp;
 {
 	SmDebugOutput = fp;
+}
+
+/*
+**  SM_DEBUG_CLOSE -- Close debug file pointer.
+**
+**	Parameters:
+**		none.
+**
+**	Returns:
+**		none.
+**
+**	Side Effects:
+**		Closes SmDebugOutput.
+*/
+
+void
+sm_debug_close()
+{
+	if (SmDebugOutput != NULL && SmDebugOutput != smioout)
+	{
+		sm_io_close(SmDebugOutput, SM_TIME_DEFAULT);
+		SmDebugOutput = NULL;
+	}
 }
 
 /*
@@ -164,7 +190,7 @@ const char SmDebugMagic[] = "sm_debug";
 **		none.
 */
 
-void
+static void
 sm_debug_reset()
 {
 	SM_DEBUG_T *debug;
@@ -231,7 +257,7 @@ sm_debug_addsetting_x(pattern, level)
 
 static const char *
 parse_named_setting_x(s)
-	register const char *s;
+	const char *s;
 {
 	const char *pat, *endpat;
 	int level;
@@ -292,7 +318,7 @@ parse_named_setting_x(s)
 
 void
 sm_debug_addsettings_x(s)
-	register const char *s;
+	const char *s;
 {
 	for (;;)
 	{

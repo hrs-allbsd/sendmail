@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2001-2002 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 2001-2002, 2004 Sendmail, Inc. and its suppliers.
  *      All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -8,7 +8,7 @@
  */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Id: t-event.c,v 1.11 2002/04/25 01:50:25 ca Exp $")
+SM_RCSID("@(#)$Id: t-event.c,v 1.13 2005/06/14 23:07:20 ca Exp $")
 
 #include <stdio.h>
 
@@ -16,15 +16,18 @@ SM_RCSID("@(#)$Id: t-event.c,v 1.11 2002/04/25 01:50:25 ca Exp $")
 #include <unistd.h>
 # include <sys/wait.h>
 #if SM_CONF_SETITIMER
-# include <sys/time.h>
+# include <sm/time.h>
 #endif /* SM_CONF_SETITIMER */
 
 #include <sm/clock.h>
 #include <sm/test.h>
 
-int check;
+static void	evcheck __P((int));
+static void	ev1 __P((int));
 
-void
+static int check;
+
+static void
 evcheck(arg)
 	int arg;
 {
@@ -33,7 +36,7 @@ evcheck(arg)
 	check++;
 }
 
-void
+static void
 ev1(arg)
 	int arg;
 {

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2003 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1998-2005 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -13,7 +13,7 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Id: mci.c,v 8.205.2.4 2003/03/31 17:35:27 ca Exp $")
+SM_RCSID("@(#)$Id: mci.c,v 8.216 2005/07/12 22:27:44 ca Exp $")
 
 #if NETINET || NETINET6
 # include <arpa/inet.h>
@@ -47,11 +47,9 @@ static int	mci_read_persistent __P((SM_FILE_T *, MCI *));
 **	MciCacheTimeout is the time (in seconds) that a connection
 **	is permitted to survive without activity.
 **
-**	We actually try any cached connections by sending a NOOP
-**	before we use them; if the NOOP fails we close down the
-**	connection and reopen it.  Note that this means that a
-**	server SMTP that doesn't support NOOP will hose the
-**	algorithm -- but that doesn't seem too likely.
+**	We actually try any cached connections by sending a RSET
+**	before we use them; if the RSET fails we close down the
+**	connection and reopen it (see smtpprobe()).
 **
 **	The persistent MCI code is donated by Mark Lovell and Paul
 **	Vixie.  It is based on the long term host status code in KJS
@@ -398,6 +396,57 @@ mci_get(host, m)
 
 	return mci;
 }
+
+/*
+**  MCI_CLOSE -- (forcefully) close files used for a connection.
+**	Note: this is a last resort, usually smtpquit() or endmailer()
+**		should be used to close a connection.
+**
+**	Parameters:
+**		mci -- the connection to close.
+**		where -- where has this been called?
+**
+**	Returns:
+**		none.
+*/
+
+void
+mci_close(mci, where)
+	MCI *mci;
+	char *where;
+{
+	bool dumped;
+
+	if (mci == NULL)
+		return;
+	dumped = false;
+	if (mci->mci_out != NULL)
+	{
+		if (tTd(56, 1))
+		{
+			sm_dprintf("mci_close: mci_out!=NULL, where=%s\n",
+				where);
+			mci_dump(sm_debug_file(), mci, false);
+			dumped = true;
+		}
+		(void) sm_io_close(mci->mci_out, SM_TIME_DEFAULT);
+		mci->mci_out = NULL;
+	}
+	if (mci->mci_in != NULL)
+	{
+		if (tTd(56, 1))
+		{
+			sm_dprintf("mci_close: mci_in!=NULL, where=%s\n",
+				where);
+			if (!dumped)
+				mci_dump(sm_debug_file(), mci, false);
+		}
+		(void) sm_io_close(mci->mci_in, SM_TIME_DEFAULT);
+		mci->mci_in = NULL;
+	}
+	mci->mci_state = MCIS_CLOSED;
+}
+
 /*
 **  MCI_NEW -- allocate new MCI structure
 **
@@ -487,6 +536,7 @@ mci_setstat(mci, xstat, dstat, rstat)
 **  MCI_DUMP -- dump the contents of an MCI structure.
 **
 **	Parameters:
+**		fp -- output file pointer
 **		mci -- the MCI structure to dump.
 **
 **	Returns:
@@ -529,7 +579,8 @@ static struct mcifbits	MciFlags[] =
 };
 
 void
-mci_dump(mci, logit)
+mci_dump(fp, mci, logit)
+	SM_FILE_T *fp;
 	register MCI *mci;
 	bool logit;
 {
@@ -597,12 +648,13 @@ printit:
 	if (logit)
 		sm_syslog(LOG_DEBUG, CurEnv->e_id, "%.1000s", buf);
 	else
-		(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT, "%s\n", buf);
+		(void) sm_io_fprintf(fp, SM_TIME_DEFAULT, "%s\n", buf);
 }
 /*
 **  MCI_DUMP_ALL -- print the entire MCI cache
 **
 **	Parameters:
+**		fp -- output file pointer
 **		logit -- if set, log the result instead of printing
 **			to stdout.
 **
@@ -611,7 +663,8 @@ printit:
 */
 
 void
-mci_dump_all(logit)
+mci_dump_all(fp, logit)
+	SM_FILE_T *fp;
 	bool logit;
 {
 	register int i;
@@ -620,7 +673,7 @@ mci_dump_all(logit)
 		return;
 
 	for (i = 0; i < MaxMciCache; i++)
-		mci_dump(MciCache[i], logit);
+		mci_dump(fp, MciCache[i], logit);
 }
 /*
 **  MCI_LOCK_HOST -- Lock host while sending.
@@ -925,7 +978,7 @@ mci_read_persistent(fp, mci)
 
 		  case '.':		/* end of file */
 			if (tTd(56, 93))
-				mci_dump(mci, false);
+				mci_dump(sm_debug_file(), mci, false);
 			return 0;
 
 		  default:
@@ -1041,7 +1094,7 @@ mci_store_persistent(mci)
 
 int
 mci_traverse_persistent(action, pathname)
-	int (*action)();
+	int (*action)__P((char *, char *));
 	char *pathname;
 {
 	struct stat statbuf;
@@ -1071,6 +1124,9 @@ mci_traverse_persistent(action, pathname)
 		char *newptr;
 		struct dirent *e;
 		char newpath[MAXPATHLEN];
+#if MAXPATHLEN <= MAXNAMLEN - 3
+ ERROR "MAXPATHLEN <= MAXNAMLEN - 3"
+#endif /* MAXPATHLEN  <= MAXNAMLEN - 3 */
 
 		if ((d = opendir(pathname)) == NULL)
 		{

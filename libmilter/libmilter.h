@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1999-2003 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1999-2003, 2006 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -19,7 +19,7 @@
 #ifdef _DEFINE
 # define EXTERN
 # define INIT(x)	= x
-SM_IDSTR(MilterlId, "@(#)$Id: libmilter.h,v 8.33.2.13 2003/10/20 21:51:50 msk Exp $")
+SM_IDSTR(MilterlId, "@(#)$Id: libmilter.h,v 8.51 2006/01/04 02:24:37 ca Exp $")
 #else /* _DEFINE */
 # define EXTERN extern
 # define INIT(x)
@@ -49,7 +49,7 @@ typedef pthread_mutex_t smutex_t;
 # define smutex_unlock(mp)	(pthread_mutex_unlock(mp) == 0)
 # define smutex_trylock(mp)	(pthread_mutex_trylock(mp) == 0)
 
-#if _FFR_USE_POLL
+#if SM_CONF_POLL
 
 # include <poll.h>
 # define MI_POLLSELECT  "poll"
@@ -86,7 +86,7 @@ typedef pthread_mutex_t smutex_t;
 # define FD_RD_READY(sd, rds, excs, timeout)	\
 		poll(&(rds), 1, MI_MS(timeout))
 
-#else /* _FFR_USE_POLL */
+#else /* SM_CONF_POLL */
 
 # include <sm/fdset.h>
 # define MI_POLLSELECT  "select"
@@ -102,7 +102,7 @@ typedef pthread_mutex_t smutex_t;
 
 # define FD_WR_INIT(sd, wrs)			\
 		FD_ZERO(&(wrs));			\
-		FD_SET((unsigned int) (sd), &(wrs));	\
+		FD_SET((unsigned int) (sd), &(wrs))
 
 # define FD_IS_RD_EXC(sd, rds, excs) FD_ISSET(sd, &(excs))
 # define FD_IS_WR_RDY(sd, wrs) FD_ISSET((sd), &(wrs))
@@ -113,7 +113,7 @@ typedef pthread_mutex_t smutex_t;
 # define FD_RD_READY(sd, rds, excs, timeout)	\
 		select((sd) + 1, &(rds), NULL, &(excs), (timeout))
 
-#endif /* _FFR_USE_POLL */
+#endif /* SM_CONF_POLL */
 
 #include <sys/time.h>
 

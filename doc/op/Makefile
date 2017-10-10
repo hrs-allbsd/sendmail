@@ -1,4 +1,4 @@
-#	$Id: Makefile,v 8.14 2002/01/07 22:24:36 gshapiro Exp $
+#	$Id: Makefile,v 8.16 2006/01/05 22:03:31 ca Exp $
 
 DIR=		smm/08.sendmailop
 SRCS=		op.me
@@ -22,9 +22,11 @@ all: ${OBJS}
 op.ps: ${SRCS}
 	rm -f $@
 	${PIC} ${SRCS} | ${EQNPS} | ${ROFFPS} > $@
+	test -s $@ || ${ROFFPS} -p -e ${SRCS} > $@
 
 op.txt: ${SRCS}
 	rm -f $@
+	@echo "Note: see README file in case of errors."
 	${PIC} ${SRCS} | ${EQNASCII} | ${ROFFASCII} | ${ULASCII} > $@
 
 op.pdf: op.ps

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2003 Sendmail, Inc. and its suppliers.
+ * Copyright (c) 1998-2006 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -13,12 +13,20 @@
 
 #include <sendmail.h>
 
-SM_RCSID("@(#)$Id: conf.c,v 8.972.2.54 2004/01/08 21:54:55 ca Exp $")
+SM_RCSID("@(#)$Id: conf.c,v 8.1081 2006/02/24 02:21:53 ca Exp $")
 
 #include <sendmail/pathnames.h>
 #if NEWDB
 # include "sm/bdb.h"
 #endif /* NEWDB */
+
+#ifdef DEC
+# if NETINET6
+/* for the IPv6 device lookup */
+#  define _SOCKADDR_LEN
+#  include <macros.h>
+# endif /* NETINET6 */
+#endif /* DEC */
 
 # include <sys/ioctl.h>
 # include <sys/param.h>
@@ -35,6 +43,12 @@ static void	setupmaps __P((void));
 static void	setupmailers __P((void));
 static void	setupqueues __P((void));
 static int	get_num_procs_online __P((void));
+static int	add_hostnames __P((SOCKADDR *));
+
+#if NETINET6 && NEEDSGETIPNODE
+static struct hostent *getipnodebyname __P((char *, int, int, int *));
+static struct hostent *getipnodebyaddr __P((char *, int, int, int *));
+#endif /* NETINET6 && NEEDSGETIPNODE */
 
 
 /*
@@ -81,6 +95,7 @@ struct hdrinfo	HdrInfo[] =
 	{ "errors-to",			H_FROM|H_ERRORSTO,	NULL	},
 	{ "full-name",			H_ACHECK,		NULL	},
 	{ "return-receipt-to",		H_RECEIPTTO,		NULL	},
+	{ "delivery-receipt-to",	H_RECEIPTTO,		NULL	},
 	{ "disposition-notification-to",	H_FROM,		NULL	},
 
 		/* destination fields */
@@ -143,6 +158,9 @@ struct prival PrivacyValues[] =
 	{ "noreceipts",		PRIV_NORECEIPTS		},
 	{ "nobodyreturn",	PRIV_NOBODYRETN		},
 	{ "goaway",		PRIV_GOAWAY		},
+#if _FFR_PRIV_NOACTUALRECIPIENT
+	{ "noactualrecipient",	PRIV_NOACTUALRECIPIENT	},
+#endif /* _FFR_PRIV_NOACTUALRECIPIENT */
 	{ NULL,			0			}
 };
 
@@ -259,9 +277,7 @@ setdefaults(e)
 	WkClassFact = 1800L;			/* option z */
 	WkTimeFact = 90000L;			/* option Z */
 	QueueFactor = WkRecipFact * 20;		/* option q */
-#if _FFR_QUARANTINE
 	QueueMode = QM_NORMAL;		/* what queue items to act upon */
-#endif /* _FFR_QUARANTINE */
 	FileMode = (RealUid != geteuid()) ? 0644 : 0600;
 						/* option F */
 	QueueFileMode = (RealUid != geteuid()) ? 0644 : 0600;
@@ -336,8 +352,10 @@ setdefaults(e)
 	MaxMimeFieldLength = MaxMimeHeaderLength / 2;
 	MaxForwardEntries = 0;
 	FastSplit = 1;
+	MaxNOOPCommands = MAXNOOPCOMMANDS;
 #if SASL
 	AuthMechanisms = newstr(AUTH_MECHANISMS);
+	AuthRealm = NULL;
 	MaxSLBits = INT_MAX;
 #endif /* SASL */
 #if STARTTLS
@@ -368,12 +386,11 @@ setdefaults(e)
 #if MILTER
 	InputFilters[0] = NULL;
 #endif /* MILTER */
-#if _FFR_REJECT_LOG
 	RejectLogInterval = 3 HOURS;
-#endif /* _FFR_REJECT_LOG */
-#if _FFR_REQ_DIR_FSYNC_OPT
+#if REQUIRES_DIR_FSYNC
 	RequiresDirfsync = true;
-#endif /* _FFR_REQ_DIR_FSYNC_OPT */
+#endif /* REQUIRES_DIR_FSYNC */
+	ConnectionRateWindowSize = 60;
 	setupmaps();
 	setupqueues();
 	setupmailers();
@@ -639,6 +656,13 @@ setupmaps()
 	MAPDEF("arith", NULL, 0,
 		dequote_init, null_map_open, null_map_close,
 		arith_map_lookup, null_map_store);
+
+#if SOCKETMAP
+	/* arbitrary daemons */
+	MAPDEF("socket", NULL, MCF_ALIASOK,
+		map_parseargs, socket_map_open, socket_map_close,
+		socket_map_lookup, null_map_store);
+#endif /* SOCKETMAP */
 
 	if (tTd(38, 2))
 	{
@@ -1416,6 +1440,7 @@ init_vendor_macros(e)
 #define LA_DEVSHORT	13	/* read short from a device */
 #define LA_ALPHAOSF	14	/* Digital UNIX (OSF/1 on Alpha) table() call */
 #define LA_PSET		15	/* Solaris per-processor-set load average */
+#define LA_LONGLONG	17 /* read kmem for avenrun; interpret as long long */
 
 /* do guesses based on general OS type */
 #ifndef LA_TYPE
@@ -1454,7 +1479,7 @@ init_vendor_macros(e)
 # define _PATH_KMEM	"/dev/kmem"
 #endif /* ! _PATH_KMEM */
 
-#if (LA_TYPE == LA_INT) || (LA_TYPE == LA_FLOAT) || (LA_TYPE == LA_SHORT)
+#if (LA_TYPE == LA_INT) || (LA_TYPE == LA_FLOAT) || (LA_TYPE == LA_SHORT) || (LA_TYPE == LA_LONGLONG)
 
 # include <nlist.h>
 
@@ -1488,11 +1513,14 @@ getla()
 # else /* LA_TYPE == LA_INT */
 #  if LA_TYPE == LA_SHORT
 	short avenrun[3];
-#  else /* LA_TYPE == LA_SHORT */
+#  else
+#   if LA_TYPE == LA_LONGLONG
+	long long avenrun[3];
+#   else /* LA_TYPE == LA_LONGLONG */
 	double avenrun[3];
+#   endif /* LA_TYPE == LA_LONGLONG */
 #  endif /* LA_TYPE == LA_SHORT */
 # endif /* LA_TYPE == LA_INT */
-	extern int errno;
 	extern off_t lseek();
 
 	if (kmem < 0)
@@ -1556,7 +1584,7 @@ getla()
 				   sm_errstring(errno));
 		return -1;
 	}
-# if (LA_TYPE == LA_INT) || (LA_TYPE == LA_SHORT)
+# if (LA_TYPE == LA_INT) || (LA_TYPE == LA_SHORT) || (LA_TYPE == LA_LONGLONG)
 	if (tTd(3, 5))
 	{
 #  if LA_TYPE == LA_SHORT
@@ -1564,9 +1592,15 @@ getla()
 		if (tTd(3, 15))
 			sm_dprintf(", %d, %d", avenrun[1], avenrun[2]);
 #  else /* LA_TYPE == LA_SHORT */
+#   if LA_TYPE == LA_LONGLONG
+		sm_dprintf("getla: avenrun = %lld", avenrun[0]);
+		if (tTd(3, 15))
+			sm_dprintf(", %lld, %lld", avenrun[1], avenrun[2]);
+#   else /* LA_TYPE == LA_LONGLONG */
 		sm_dprintf("getla: avenrun = %ld", avenrun[0]);
 		if (tTd(3, 15))
 			sm_dprintf(", %ld, %ld", avenrun[1], avenrun[2]);
+#   endif /* LA_TYPE == LA_LONGLONG */
 #  endif /* LA_TYPE == LA_SHORT */
 		sm_dprintf("\n");
 	}
@@ -1574,7 +1608,7 @@ getla()
 		sm_dprintf("getla: %d\n",
 			(int) (avenrun[0] + FSCALE/2) >> FSHIFT);
 	return ((int) (avenrun[0] + FSCALE/2) >> FSHIFT);
-# else /* (LA_TYPE == LA_INT) || (LA_TYPE == LA_SHORT) */
+# else /* (LA_TYPE == LA_INT) || (LA_TYPE == LA_SHORT) || (LA_TYPE == LA_LONGLONG) */
 	if (tTd(3, 5))
 	{
 		sm_dprintf("getla: avenrun = %g", avenrun[0]);
@@ -1585,10 +1619,10 @@ getla()
 	if (tTd(3, 1))
 		sm_dprintf("getla: %d\n", (int) (avenrun[0] +0.5));
 	return ((int) (avenrun[0] + 0.5));
-# endif /* (LA_TYPE == LA_INT) || (LA_TYPE == LA_SHORT) */
+# endif /* (LA_TYPE == LA_INT) || (LA_TYPE == LA_SHORT) || (LA_TYPE == LA_LONGLONG) */
 }
 
-#endif /* (LA_TYPE == LA_INT) || (LA_TYPE == LA_FLOAT) || (LA_TYPE == LA_SHORT) */
+#endif /* (LA_TYPE == LA_INT) || (LA_TYPE == LA_FLOAT) || (LA_TYPE == LA_SHORT) || (LA_TYPE == LA_LONGLONG) */
 
 #if LA_TYPE == LA_READKSYM
 
@@ -1600,7 +1634,6 @@ getla()
 	int j;
 	static int kmem = -1;
 	long avenrun[3];
-	extern int errno;
 	struct mioc_rksym mirk;
 
 	if (kmem < 0)
@@ -1828,6 +1861,12 @@ getla()
 
 # include <sys/sysmp.h>
 
+# ifdef _UNICOSMP
+#  define CAST_SYSMP(x)	(x)
+# else /* _UNICOSMP */
+#  define CAST_SYSMP(x)	((x) & 0x7fffffff)
+# endif /* _UNICOSMP */
+
 int
 getla(void)
 {
@@ -1857,7 +1896,8 @@ getla(void)
 		}
 	}
 
-	if (lseek(kmem, (sysmp(MP_KERNADDR, MPKA_AVENRUN) & 0x7fffffff), SEEK_SET) == -1 ||
+	if (lseek(kmem, CAST_SYSMP(sysmp(MP_KERNADDR, MPKA_AVENRUN)), SEEK_SET)
+		== -1 ||
 	    read(kmem, (char *) avenrun, sizeof(avenrun)) < sizeof(avenrun))
 	{
 		if (tTd(3, 1))
@@ -2143,10 +2183,25 @@ shouldqueue(pri, ct)
 	time_t ct;
 {
 	bool rval;
+#if _FFR_MEMSTAT
+	long memfree;
+#endif /* _FFR_MEMSTAT */
 
 	if (tTd(3, 30))
 		sm_dprintf("shouldqueue: CurrentLA=%d, pri=%ld: ",
 			CurrentLA, pri);
+
+#if _FFR_MEMSTAT
+	if (QueueLowMem > 0 &&
+	    sm_memstat_get(MemoryResource, &memfree) >= 0 &&
+	    memfree < QueueLowMem)
+	{
+		if (tTd(3, 30))
+			sm_dprintf("true (memfree=%ld < QueueLowMem)\n",
+				memfree, QueueLowMem);
+		return true;
+	}
+#endif /* _FFR_MEMSTAT */
 	if (CurrentLA < QueueLA)
 	{
 		if (tTd(3, 30))
@@ -2193,16 +2248,19 @@ refuseconnections(name, e, d, active)
 {
 	static time_t lastconn[MAXDAEMONS];
 	static int conncnt[MAXDAEMONS];
-#if _FFR_REJECT_LOG
 	static time_t firstrejtime[MAXDAEMONS];
 	static time_t nextlogtime[MAXDAEMONS];
-#endif /* _FFR_REJECT_LOG */
+#if _FFR_MEMSTAT
+	long memfree;
+#endif /* _FFR_MEMSTAT */
 
 #if XLA
 	if (!xla_smtp_ok())
 		return true;
 #endif /* XLA */
 
+	SM_ASSERT(d >= 0);
+	SM_ASSERT(d < MAXDAEMONS);
 	if (ConnRateThrottle > 0)
 	{
 		time_t now;
@@ -2231,19 +2289,29 @@ refuseconnections(name, e, d, active)
 			conncnt[d] = 0;
 	}
 
+
+#if _FFR_MEMSTAT
+	if (RefuseLowMem > 0 &&
+	    sm_memstat_get(MemoryResource, &memfree) >= 0 &&
+	    memfree < RefuseLowMem)
+	{
+# define R_MSG_LM "rejecting connections on daemon %s: free memory: %ld"
+		sm_setproctitle(true, e, R_MSG_LM, name, memfree);
+		if (LogLevel > 8)
+			sm_syslog(LOG_NOTICE, NOQID, R_MSG_LM, name, memfree);
+		return true;
+	}
+#endif /* _FFR_MEMSTAT */
 	sm_getla();
 	if (RefuseLA > 0 && CurrentLA >= RefuseLA)
 	{
-# if _FFR_REJECT_LOG
 		time_t now;
 
-#  define R2_MSG_LA "have been rejecting connections on daemon %s for %s"
-# endif /* _FFR_REJECT_LOG */
 # define R_MSG_LA "rejecting connections on daemon %s: load average: %d"
+# define R2_MSG_LA "have been rejecting connections on daemon %s for %s"
 		sm_setproctitle(true, e, R_MSG_LA, name, CurrentLA);
 		if (LogLevel > 8)
 			sm_syslog(LOG_NOTICE, NOQID, R_MSG_LA, name, CurrentLA);
-# if _FFR_REJECT_LOG
 		now = curtime();
 		if (firstrejtime[d] == 0)
 		{
@@ -2256,13 +2324,10 @@ refuseconnections(name, e, d, active)
 				  pintvl(now - firstrejtime[d], true));
 			nextlogtime[d] = now + RejectLogInterval;
 		}
-# endif /* _FFR_REJECT_LOG */
 		return true;
 	}
-# if _FFR_REJECT_LOG
 	else
 		firstrejtime[d] = 0;
-# endif /* _FFR_REJECT_LOG */
 
 	if (DelayLA > 0 && CurrentLA >= DelayLA)
 	{
@@ -3706,7 +3771,7 @@ chownsafe(fd, safedir)
 
 #if HASSETRLIMIT
 # ifdef RLIMIT_NEEDS_SYS_TIME_H
-#  include <sys/time.h>
+#  include <sm/time.h>
 # endif /* RLIMIT_NEEDS_SYS_TIME_H */
 # include <sys/resource.h>
 #endif /* HASSETRLIMIT */
@@ -3768,6 +3833,13 @@ setvendor(vendor)
 		return true;
 	}
 #endif /* SUN_EXTENSIONS */
+#ifdef DEC
+	if (sm_strcasecmp(vendor, "Digital") == 0)
+	{
+		VendorCode = VENDOR_DEC;
+		return true;
+	}
+#endif /* DEC */
 
 #if defined(VENDOR_NAME) && defined(VENDOR_CODE)
 	if (sm_strcasecmp(vendor, VENDOR_NAME) == 0)
@@ -3859,8 +3931,8 @@ vendor_pre_defaults(e)
 	**  /etc/mail/sendmail.cf without this
 	*/
 
-	setuserenv("ISP", NULL);
-	setuserenv("SYSTYPE", NULL);
+	sm_setuserenv("ISP", NULL);
+	sm_setuserenv("SYSTYPE", NULL);
 #endif /* apollo */
 }
 
@@ -3874,7 +3946,7 @@ vendor_post_defaults(e)
 
 	/* Makes sure the SOCK environment variable remains */
 	if (p = getextenv("SOCK"))
-		setuserenv("SOCK", p);
+		sm_setuserenv("SOCK", p);
 #endif /* __QNX__ */
 #if defined(SUN_EXTENSIONS) && defined(SUN_DEFAULT_VALUES)
 	sun_post_defaults(e);
@@ -3968,6 +4040,7 @@ validate_connection(sap, hostname, e)
 		sm_dprintf("validate_connection(%s, %s)\n",
 			hostname, anynet_ntoa(sap));
 
+	connection_rate_check(sap, e);
 	if (rscheck("check_relay", hostname, anynet_ntoa(sap),
 		    e, RSF_RMCOMM|RSF_COUNT, 3, NULL, NOQID) != EX_OK)
 	{
@@ -4649,7 +4722,7 @@ add_hostnames(sa)
 struct rtentry;
 struct mbuf;
 # ifndef SUNOS403
-#  include <sys/time.h>
+#  include <sm/time.h>
 # endif /* ! SUNOS403 */
 # if (_AIX4 >= 40300) && !defined(_NET_IF_H)
 #  undef __P
@@ -4790,7 +4863,13 @@ load_if_names()
 			i += sizeof ifr->lifr_name + sa->sa.sa_len;
 		else
 #  endif /* BSD4_4_SOCKADDR */
+#  ifdef DEC
+			/* fix for IPv6  size differences */
+			i += sizeof ifr->ifr_name +
+			     max(sizeof(ifr->ifr_addr), ifr->ifr_addr.sa_len);
+#   else /* DEC */
 			i += sizeof *ifr;
+#   endif /* DEC */
 
 		if (tTd(0, 20))
 			sm_dprintf("%s\n", anynet_ntoa(sa));
@@ -5155,6 +5234,80 @@ get_num_procs_online()
 	return nproc;
 }
 /*
+**  SM_CLOSEFROM -- close file descriptors
+**
+**	Parameters:
+**		lowest -- first fd to close
+**		highest -- last fd + 1 to close
+**
+**	Returns:
+**		none
+*/
+
+void
+sm_closefrom(lowest, highest)
+	int lowest, highest;
+{
+#if HASCLOSEFROM
+	closefrom(lowest);
+#else /* HASCLOSEFROM */
+	int i;
+
+	for (i = lowest; i < highest; i++)
+		(void) close(i);
+#endif /* HASCLOSEFROM */
+}
+#if HASFDWALK
+/*
+**  CLOSEFD_WALK -- walk fd's arranging to close them
+**	Callback for fdwalk()
+**
+**	Parameters:
+**		lowest -- first fd to arrange to be closed
+**		fd -- fd to arrange to be closed
+**
+**	Returns:
+**		zero
+*/
+
+static int
+closefd_walk(lowest, fd)
+	void *lowest;
+	int fd;
+{
+	if (fd >= *(int *)lowest)
+		(void) fcntl(fd, F_SETFD, FD_CLOEXEC);
+	return 0;
+}
+#endif /* HASFDWALK */
+/*
+**  SM_CLOSE_ON_EXEC -- arrange for file descriptors to be closed
+**
+**	Parameters:
+**		lowest -- first fd to arrange to be closed
+**		highest -- last fd + 1 to arrange to be closed
+**
+**	Returns:
+**		none
+*/
+
+void
+sm_close_on_exec(highest, lowest)
+	int highest, lowest;
+{
+#if HASFDWALK
+	(void) fdwalk(closefd_walk, &lowest);
+#else /* HASFDWALK */
+	int i, j;
+
+	for (i = lowest; i < highest; i++)
+	{
+		if ((j = fcntl(i, F_GETFD, 0)) != -1)
+			(void) fcntl(i, F_SETFD, j | FD_CLOEXEC);
+	}
+#endif /* HASFDWALK */
+}
+/*
 **  SEED_RANDOM -- seed the random number generator
 **
 **	Parameters:
@@ -5209,8 +5362,8 @@ sm_syslog(level, id, fmt, va_alist)
 	va_dcl
 #endif /* __STDC__ */
 {
-	static char *buf = NULL;
-	static size_t bufsize;
+	char *buf;
+	size_t bufsize;
 	char *begin, *end;
 	int save_errno;
 	int seq = 1;
@@ -5234,11 +5387,8 @@ sm_syslog(level, id, fmt, va_alist)
 	else
 		idlen = strlen(id) + SyslogPrefixLen;
 
-	if (buf == NULL)
-	{
-		buf = buf0;
-		bufsize = sizeof buf0;
-	}
+	buf = buf0;
+	bufsize = sizeof buf0;
 
 	for (;;)
 	{
@@ -5280,8 +5430,8 @@ sm_syslog(level, id, fmt, va_alist)
 			(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT,
 					     "%s: %s\n", id, newstring);
 #endif /* LOG */
-		if (buf == buf0)
-			buf = NULL;
+		if (buf != buf0)
+			sm_free(buf);
 		errno = save_errno;
 		return;
 	}
@@ -5345,8 +5495,8 @@ sm_syslog(level, id, fmt, va_alist)
 		(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT,
 				     "%s[%d]: %s\n", id, seq, begin);
 #endif /* LOG */
-	if (buf == buf0)
-		buf = NULL;
+	if (buf != buf0)
+		sm_free(buf);
 	errno = save_errno;
 }
 /*
@@ -5536,6 +5686,9 @@ link(source, target)
 
 char	*CompileOptions[] =
 {
+#if ALLOW_255
+	"ALLOW_255",
+#endif /* ALLOW_255 */
 #if NAMED_BIND
 # if DNSMAP
 	"DNSMAP",
@@ -5553,6 +5706,9 @@ char	*CompileOptions[] =
 #if LDAPMAP
 	"LDAPMAP",
 #endif /* LDAPMAP */
+#if LDAP_REFERRALS
+	"LDAP_REFERRALS",
+#endif /* LDAP_REFERRALS */
 #if LOG
 	"LOG",
 #endif /* LOG */
@@ -5638,6 +5794,9 @@ char	*CompileOptions[] =
 #if SMTPDEBUG
 	"SMTPDEBUG",
 #endif /* SMTPDEBUG */
+#if SOCKETMAP
+	"SOCKETMAP",
+#endif /* SOCKETMAP */
 #if STARTTLS
 	"STARTTLS",
 #endif /* STARTTLS */
@@ -5659,6 +5818,9 @@ char	*CompileOptions[] =
 #if USE_LDAP_INIT
 	"USE_LDAP_INIT",
 #endif /* USE_LDAP_INIT */
+#if USE_TTYPATH
+	"USE_TTYPATH",
+#endif /* USE_TTYPATH */
 #if XDEBUG
 	"XDEBUG",
 #endif /* XDEBUG */
@@ -5678,9 +5840,6 @@ char	*OsCompileOptions[] =
 #if ADDRCONFIG_IS_BROKEN
 	"ADDRCONFIG_IS_BROKEN",
 #endif /* ADDRCONFIG_IS_BROKEN */
-#if ALLOW_255
-	"ALLOW_255",
-#endif /* ALLOW_255 */
 #ifdef AUTO_NETINFO_HOSTS
 	"AUTO_NETINFO_HOSTS",
 #endif /* AUTO_NETINFO_HOSTS */
@@ -5702,12 +5861,18 @@ char	*OsCompileOptions[] =
 #if FAST_PID_RECYCLE
 	"FAST_PID_RECYCLE",
 #endif /* FAST_PID_RECYCLE */
+#if HASCLOSEFROM
+	"HASCLOSEFROM",
+#endif /* HASCLOSEFROM */
 #if HASFCHOWN
 	"HASFCHOWN",
 #endif /* HASFCHOWN */
 #if HASFCHMOD
 	"HASFCHMOD",
 #endif /* HASFCHMOD */
+#if HASFDWALK
+	"HASFDWALK",
+#endif /* HASFDWALK */
 #if HASFLOCK
 	"HASFLOCK",
 #endif /* HASFLOCK */
@@ -5885,20 +6050,11 @@ char	*OsCompileOptions[] =
 
 char	*FFRCompileOptions[] =
 {
-#if _FFR_ADAPTIVE_EOL
-	/* tries to be smart about \r\n versus \n from broken clients */
-	/* known to be broken, do not use */
-	"_FFR_ADAPTIVE_EOL",
-#endif /* _FFR_ADAPTIVE_EOL */
 #if _FFR_ALLOW_SASLINFO
 	/* DefaultAuthInfo can be specified by user. */
-	/* DefaultAuthInfo doesn't really work in 8.12 anymore. */
+	/* DefaultAuthInfo doesn't really work in 8.13 anymore. */
 	"_FFR_ALLOW_SASLINFO",
 #endif /* _FFR_ALLOW_SASLINFO */
-#if _FFR_ALLOW_S0_ERROR_4XX
-	/* Allow for tempfail from S0 (ruleset 0). */
-	"_FFR_ALLOW_S0_ERROR_4XX",
-#endif /* _FFR_ALLOW_S0_ERROR_4XX */
 #if _FFR_BESTMX_BETTER_TRUNCATION
 	/* Better truncation of list of MX records for dns map. */
 	"_FFR_BESTMX_BETTER_TRUNCATION",
@@ -5911,19 +6067,10 @@ char	*FFRCompileOptions[] =
 
 	"_FFR_BLOCK_PROXIES",
 #endif /* _FFR_BLOCK_PROXIES */
-#if _FFR_CACHE_LPC
-	/* Cache connections to LCP based mailers */
-/* Christophe Wolfhugel of France Telecom Oleane */
-	"_FFR_CACHE_LPC",
-#endif /* _FFR_CACHE_LPC */
 #if _FFR_CATCH_BROKEN_MTAS
 	/* Deal with MTAs that send a reply during the DATA phase. */
 	"_FFR_CATCH_BROKEN_MTAS",
 #endif /* _FFR_CATCH_BROKEN_MTAS */
-#if _FFR_CATCH_LONG_STRINGS
-	/* Report long address strings instead of silently ignoring them. */
-	"_FFR_CATCH_LONG_STRINGS",
-#endif /* _FFR_CATCH_LONG_STRINGS */
 #if _FFR_CHECK_EOM
 	/* Enable check_eom ruleset */
 	"_FFR_CHECK_EOM",
@@ -5940,23 +6087,31 @@ char	*FFRCompileOptions[] =
 	/* Extended daemon status. */
 	"_FFR_CONTROL_MSTAT",
 #endif /* _FFR_CONTROL_MSTAT */
+#if _FFR_CRLPATH
+	/* CRLPath; needs documentation; Al Smith */
+	"_FFR_CRLPATH",
+#endif /* _FFR_CRLPATH */
 #if _FFR_DAEMON_NETUNIX
 	/* Allow local (not just TCP) socket connection to server. */
 	"_FFR_DAEMON_NETUNIX",
 #endif /* _FFR_DAEMON_NETUNIX */
-#if _FFR_DEAL_WITH_ERROR_SSL
-	/* Deal with SSL errors by recognizing them as EOF. */
-	"_FFR_DEAL_WITH_ERROR_SSL",
-#endif /* _FFR_DEAL_WITH_ERROR_SSL */
 #if _FFR_DEPRECATE_MAILER_FLAG_I
 	/* What it says :-) */
 	"_FFR_DEPRECATE_MAILER_FLAG_I",
 #endif /* _FFR_DEPRECATE_MAILER_FLAG_I */
+#if _FFR_DM_ONE
+	/* deliver first TA in background, then queue */
+	"_FFR_DM_ONE",
+#endif /* _FFR_DM_ONE */
 #if _FFR_DIGUNIX_SAFECHOWN
 	/* Properly set SAFECHOWN (include/sm/conf.h) for Digital UNIX */
 /* Problem noted by Anne Bennett of Concordia University */
 	"_FFR_DIGUNIX_SAFECHOWN",
 #endif /* _FFR_DIGUNIX_SAFECHOWN */
+#if _FFR_DM_PER_DAEMON
+	/* DeliveryMode per DaemonPortOptions: 'D' */
+	"_FFR_DM_PER_DAEMON",
+#endif /* _FFR_DM_PER_DAEMON */
 #if _FFR_DNSMAP_ALIASABLE
 	/* Allow dns map type to be used for aliases. */
 /* Don Lewis of TDK */
@@ -5978,11 +6133,6 @@ char	*FFRCompileOptions[] =
 	/* Enable DontLockFilesForRead option. */
 	"_FFR_DONTLOCKFILESFORREAD_OPTION",
 #endif /* _FFR_DONTLOCKFILESFORREAD_OPTION */
-#if _FFR_DONT_STOP_LOOKING
-	/* Continue with DNS lookups on ECONNREFUSED and TRY_AGAIN. */
-/* Noted by Neil Rickert of Northern Illinois University */
-	"_FFR_DONT_STOP_LOOKING",
-#endif /* _FFR_DONT_STOP_LOOKING */
 #if _FFR_DOTTED_USERNAMES
 	/* Allow usernames with '.' */
 	"_FFR_DOTTED_USERNAMES",
@@ -6016,6 +6166,10 @@ char	*FFRCompileOptions[] =
 	/* Generate a ORCPT DSN arg if not already provided */
 	"_FFR_GEN_ORCPT",
 #endif /* _FFR_GEN_ORCPT */
+#if _FFR_LOG_GREET_PAUSE
+	/* log time for greet_pause delay; from Nik Clayton */
+	"_FFR_LOG_GREET_PAUSE",
+#endif /* _FFR_LOG_GREET_PAUSE */
 #if _FFR_GROUPREADABLEAUTHINFOFILE
 	/* Allow group readable DefaultAuthInfo file. */
 	"_FFR_GROUPREADABLEAUTHINFOFILE",
@@ -6033,6 +6187,10 @@ char	*FFRCompileOptions[] =
 	/* Set 'h' in {addr_type} for headers. */
 	"_FFR_HDR_TYPE",
 #endif /* _FFR_HDR_TYPE */
+#if _FFR_HELONAME
+	/* option to set heloname; Nik Clayton of FreeBSD */
+	"_FFR_HELONAME",
+#endif /* _FFR_HELONAME */
 #if _FFR_HPUX_NSSWITCH
 	/* Use nsswitch on HP-UX */
 	"_FFR_HPUX_NSSWITCH",
@@ -6045,47 +6203,56 @@ char	*FFRCompileOptions[] =
 	/* Ignore extensions offered in response to HELO */
 	"_FFR_IGNORE_EXT_ON_HELO",
 #endif /* _FFR_IGNORE_EXT_ON_HELO */
-#if _FFR_LDAP_RECURSION
-	/* Support LDAP recursion in LDAP responses */
-/* Andrew Baucom */
-	"_FFR_LDAP_RECURSION",
-#endif /* _FFR_LDAP_RECURSION */
-#if _FFR_LDAP_SETVERSION
-	/* New LDAP map option for setting LDAP protocol version */
-	"_FFR_LDAP_SETVERSION",
-#endif /* _FFR_LDAP_SETVERSION */
-#if _FFR_LDAP_URI
-	/* Support LDAP URI form of specifying host/port (and allows ldaps) */
-	"_FFR_LDAP_URI",
-#endif /* _FFR_LDAP_URI */
+#if _FFR_MAXDATASIZE
+	/*
+	**  It is possible that a header is larger than MILTER_CHUNK_SIZE,
+	**  hence this shouldn't be used as limit for milter communication.
+	**  see also libmilter/comm.c
+	**  Gurusamy Sarathy of ActiveState
+	*/
+
+	"_FFR_MAXDATASIZE",
+#endif /* _FFR_MAXDATASIZE */
 #if _FFR_MAX_FORWARD_ENTRIES
 	/* Try to limit number of .forward entries */
 	/* (doesn't work) */
 /* Randall S. Winchester of the University of Maryland */
 	"_FFR_MAX_FORWARD_ENTRIES",
 #endif /* _FFR_MAX_FORWARD_ENTRIES */
+#if _FFR_MAXKEY
+	/* increase key size for LDAP lookups, see conf.h */
+	"_FFR_MAXKEY",
+#endif /* _FFR_MAXKEY */
+#if _FFR_MAXNOOPCOMMANDS
+	/* runtime option for "MaxNOOPCommands" */
+	"_FFR_MAXNOOPCOMMANDS",
+#endif /* _FFR_MAXNOOPCOMMANDS */
 #if _FFR_MAX_SLEEP_TIME
 	/* Limit sleep(2) time in libsm/clock.c */
 	"_FFR_MAX_SLEEP_TIME",
 #endif /* _FFR_MAX_SLEEP_TIME */
-#if _FFR_MESSAGEID_MACRO
-	/* stick the message ID header's value in a macro */
-	"_FFR_MESSAGEID_MACRO",
-#endif /* _FFR_MESSAGEID_MACRO */
-#if MILTER
-# if _FFR_MILTER_421
-	/* If a filter returns 421, close the SMTP connection */
-	"_FFR_MILTER_421",
-# endif /* _FFR_MILTER_421 */
-# if _FFR_MILTER_MACROS_EOM
-	/* Add an EOM macro set for milter */
-	"_FFR_MILTER_MACROS_EOM",
-# endif /* _FFR_MILTER_MACROS_EOM */
-# if _FFR_MILTER_PERDAEMON
-	/* Per DaemonPortOptions InputMailFilter lists */
-	"_FFR_MILTER_PERDAEMON",
-# endif /* _FFR_MILTER_PERDAEMON */
-#endif /* MILTER */
+#if _FFR_MEMSTAT
+	/* Check free memory */
+	"_FFR_MEMSTAT",
+#endif /* _FFR_MEMSTAT */
+#if _FFR_MILTER_NAGLE
+	/* milter: turn off Nagle ("cork" on Linux) */
+	/* John Gardiner Myers of Proofpoint */
+	"_FFR_MILTER_NAGLE ",
+#endif /* _FFR_MILTER_NAGLE */
+#if _FFR_MILTER_NOHDR_RESP
+	/* milter: no response expected when sending headers */
+	/* John Gardiner Myers of Proofpoint */
+	"_FFR_MILTER_NOHDR_RESP",
+#endif /* _FFR_MILTER_NOHDR_RESP */
+#if _FFR_MIME7TO8_OLD
+	/* Old mime7to8 code, the new is broken for at least one example. */
+	"_FFR_MIME7TO8_OLD",
+#endif /* _FFR_MAX_SLEEP_TIME */
+#if _FFR_MSG_ACCEPT
+	/* allow to override "Message accepted for delivery" */
+	"_FFR_MSG_ACCEPT",
+#endif /* _FFR_MSG_ACCEPT */
 #if _FFR_NODELAYDSN_ON_HOLD
 	/* Do not issue a DELAY DSN for mailers that use the hold flag. */
 /* Steven Pitzl */
@@ -6095,10 +6262,19 @@ char	*FFRCompileOptions[] =
 	/* Disable PIPELINING, delay client if used. */
 	"_FFR_NO_PIPE",
 #endif /* _FFR_NO_PIPE */
-#if _FFR_QUARANTINE
-	/* Quarantine items in the queue */
-	"_FFR_QUARANTINE",
-#endif /* _FFR_QUARANTINE */
+#if _FFR_LOG_NTRIES
+	/* log ntries=, from Nik Clayton of FreeBSD */
+	"_FFR_LOG_NTRIES",
+#endif /* _FFR_LOG_NTRIES */
+#if _FFR_PRIV_NOACTUALRECIPIENT
+	/*
+	**  PrivacyOptions=noactualrecipient stops sendmail from putting
+	**  X-Actual-Recipient lines in DSNs revealing the actual
+	**  account that addresses map to.  Patch from Dan Harkless.
+	*/
+
+	"_FFR_PRIV_NOACTUALRECIPIENT",
+#endif /* _FFR_PRIV_NOACTUALRECIPIENT */
 #if _FFR_QUEUEDELAY
 	/* Exponential queue delay; disabled in 8.13 since it isn't used. */
 	"_FFR_QUEUEDELAY",
@@ -6112,18 +6288,8 @@ char	*FFRCompileOptions[] =
 	/* Define {queue} macro. */
 	"_FFR_QUEUE_MACRO",
 #endif /* _FFR_QUEUE_MACRO */
-#if _FFR_QUEUERETURN_DSN
-	/*
-	**  Provide an option for different Timeout.queue{warn,return} for
-	**  DSN messages.  These days, queues are filled with bounces for
-	**  spam that will never make it to the sender and therefore slow
-	**  down queue runs until they timeout.
-	*/
-
-	"_FFR_QUEUERETURN_DSN",
-#endif /* _FFR_QUEUERETURN_DSN */
 #if _FFR_QUEUE_RUN_PARANOIA
-	/* Additional checks when doing queue runs. */
+	/* Additional checks when doing queue runs; interval of checks */
 	"_FFR_QUEUE_RUN_PARANOIA",
 #endif /* _FFR_QUEUE_RUN_PARANOIA */
 #if _FFR_QUEUE_SCHED_DBG
@@ -6139,30 +6305,14 @@ char	*FFRCompileOptions[] =
 
 	"_FFR_REDIRECTEMPTY",
 #endif /* _FFR_REDIRECTEMPTY */
-#if _FFR_REJECT_LOG
-	/* Log when we start/stop rejecting connections due to load, etc */
-	"_FFR_REJECT_LOG",
-#endif /* _FFR_REJECT_LOG */
-#if _FFR_REQ_DIR_FSYNC_OPT
-	/* Add cf option to fsync() directories */
-	"_FFR_REQ_DIR_FSYNC_OPT",
-#endif /* _FFR_REQ_DIR_FSYNC_OPT */
 #if _FFR_RESET_MACRO_GLOBALS
 	/* Allow macro 'j' to be set dynamically via rulesets. */
 	"_FFR_RESET_MACRO_GLOBALS",
 #endif /* _FFR_RESET_MACRO_GLOBALS */
-#if _FFR_RESPOND_ALL
-	/* in vacation: respond to every message, not just once per interval */
-	"_FFR_RESPOND_ALL",
-#endif /* _FFR_RESPOND_ALL */
 #if _FFR_RHS
 	/* Random shuffle for queue sorting. */
 	"_FFR_RHS",
 #endif /* _FFR_RHS */
-#if _FFR_SASL_OPT_M
-	/* Support SASL's SASL_SEC_MUTUAL_AUTH option */
-	"_FFR_SASL_OPT_M",
-#endif /* _FFR_SASL_OPT_M */
 #if _FFR_SELECT_SHM
 	/* Auto-select of shared memory key */
 	"_FFR_SELECT_SHM",
@@ -6171,18 +6321,33 @@ char	*FFRCompileOptions[] =
 	/* Donated code (unused). */
 	"_FFR_SHM_STATUS",
 #endif /* _FFR_SHM_STATUS */
+#if _FFR_LDAP_SINGLEDN
+	/*
+	**  The LDAP database map code in Sendmail 8.12.10, when
+	**  given the -1 switch, would match only a single DN,
+	**  but was able to return multiple attributes for that
+	**  DN.  In Sendmail 8.13 this "bug" was corrected to
+	**  only return if exactly one attribute matched.
+	**
+	**  Unfortunately, our configuration uses the former
+	**  behaviour.  Attached is a relatively simple patch
+	**  to 8.13.4 which adds a -2 switch (for lack of a
+	**  better option) which returns the single dn/multiple
+	**  attributes.
+	**
+	** Jeffrey T. Eaton, Carnegie-Mellon University
+	*/
+
+	"_FFR_LDAP_SINGLEDN",
+#endif /* _FFR_LDAP_SINGLEDN */
+#if _FFR_SKIP_DOMAINS
+	/* process every N'th domain instead of every N'th message */
+	"_FFR_SKIP_DOMAINS",
+#endif /* _FFR_SKIP_DOMAINS */
 #if _FFR_SLEEP_USE_SELECT
 	/* Use select(2) in libsm/clock.c to emulate sleep(2) */
 	"_FFR_SLEEP_USE_SELECT ",
 #endif /* _FFR_SLEEP_USE_SELECT */
-#if _FFR_SMFI_OPENSOCKET
-	/* libmilter: smfi_opensocket() to force the socket open early */
-	"_FFR_SMFI_OPENSOCKET",
-#endif /* _FFR_SMFI_OPENSOCKET */
-#if _FFR_SMTP_SSL
-	/* Support for smtps (SMTP over SSL) */
-	"_FFR_SMTP_SSL",
-#endif /* _FFR_SMTP_SSL */
 #if _FFR_SOFT_BOUNCE
 	/* Turn all errors into temporary errors. */
 	"_FFR_SOFT_BOUNCE",
@@ -6199,14 +6364,10 @@ char	*FFRCompileOptions[] =
 /* Chris Adams of HiWAAY Informations Services */
 	"_FFR_SPT_ALIGN",
 #endif /* _FFR_SPT_ALIGN */
-#if _FFR_STRIPBACKSL
-	/*
-	**  Strip backslash from addresses (so sender doesn't
-	**  decide to ignore forward)
-	*/
-
-	"_FFR_STRIPBACKSL",
-#endif /* _FFR_STRIPBACKSL */
+#if _FFR_SS_PER_DAEMON
+	/* SuperSafe per DaemonPortOptions: 'T' (better letter?) */
+	"_FFR_SS_PER_DAEMON",
+#endif /* _FFR_SS_PER_DAEMON */
 #if _FFR_TIMERS
 	/* Donated code (unused). */
 	"_FFR_TIMERS",
@@ -6224,6 +6385,9 @@ char	*FFRCompileOptions[] =
 
 	"_FFR_TRUSTED_QF",
 #endif /* _FFR_TRUSTED_QF */
+#if _FFR_USE_SEM_LOCKING
+	"_FFR_USE_SEM_LOCKING",
+#endif /* _FFR_USE_SEM_LOCKING */
 #if _FFR_USE_SETLOGIN
 	/* Use setlogin() */
 /* Peter Philipp */
