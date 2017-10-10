@@ -1,5 +1,5 @@
 /*
- *  Copyright (c) 1999-2004, 2006 Sendmail, Inc. and its suppliers.
+ *  Copyright (c) 1999-2004, 2006, 2007 Sendmail, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -9,7 +9,7 @@
  */
 
 #include <sm/gen.h>
-SM_RCSID("@(#)$Id: engine.c,v 8.157 2007/03/26 18:10:04 ca Exp $")
+SM_RCSID("@(#)$Id: engine.c,v 8.159 2007/04/23 22:22:50 ca Exp $")
 
 #include "libmilter.h"
 
@@ -855,6 +855,7 @@ st_optionneg(g)
 			;
 
 	if (g->a_ctx->ctx_smfi != NULL &&
+	    g->a_ctx->ctx_smfi->xxfi_version > 4 &&
 	    (fi_negotiate = g->a_ctx->ctx_smfi->xxfi_negotiate) != NULL)
 	{
 		int r;
@@ -1177,6 +1178,7 @@ st_data(g)
 	if (g == NULL)
 		return _SMFIS_ABORT;
 	if (g->a_ctx->ctx_smfi != NULL &&
+	    g->a_ctx->ctx_smfi->xxfi_version > 3 &&
 	    (fi_data = g->a_ctx->ctx_smfi->xxfi_data) != NULL)
 		return (*fi_data)(g->a_ctx);
 	return SMFIS_CONTINUE;
@@ -1310,6 +1312,7 @@ st_unknown(g)
 	if (g == NULL)
 		return _SMFIS_ABORT;
 	if (g->a_ctx->ctx_smfi != NULL &&
+	    g->a_ctx->ctx_smfi->xxfi_version > 2 &&
 	    (fi_unknown = g->a_ctx->ctx_smfi->xxfi_unknown) != NULL)
 		return (*fi_unknown)(g->a_ctx, (const char *) g->a_buf);
 	return SMFIS_CONTINUE;
