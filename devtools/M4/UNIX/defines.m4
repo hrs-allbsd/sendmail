@@ -1,6 +1,6 @@
 divert(-1)
 #
-# Copyright (c) 1999-2001 Sendmail, Inc. and its suppliers.
+# Copyright (c) 1999-2001, 2006 Sendmail, Inc. and its suppliers.
 #	All rights reserved.
 #
 # By using this file, you agree to the terms and conditions set
@@ -10,7 +10,11 @@ divert(-1)
 #
 #  Definitions for Makefile construction for sendmail
 #
-#	$Id: defines.m4,v 8.42 2001/04/30 23:49:55 ca Exp $
+#	$Id: defines.m4,v 8.47 2006/10/06 05:44:44 ca Exp $
+#
+# temporary hack: if confREQUIRE_LIBSM is set then also set confREQUIRE_SM_OS_H
+ifdef(`confREQUIRE_LIBSM',`
+ifdef(`confREQUIRE_SM_OS_H',`', `define(`confREQUIRE_SM_OS_H', `1')')')
 #
 divert(0)dnl
 
@@ -18,7 +22,9 @@ divert(0)dnl
 CC=	confCC
 CCOPTS= ifdef(`confCCOPTS', `confCCOPTS', ` ') ifdef(`confMT', ifdef(`confMTCCOPTS', `confMTCCOPTS', `'), `')
 
-# C Linker
+# Linker for executables
+CCLINK = ifdef(`confCCLINK', `confCCLINK', `confCC')
+# Linker for libraries
 LD=	ifdef(`confLD', `confLD', `confCC')
 LDOPTS=	ifdef(`confLDOPTS', `confLDOPTS') ifdef(`confMT', ifdef(`confMTLDOPTS', `confMTLDOPTS', `'), `')
 LDOPTS_SO= ${LDOPTS} ifdef(`confLDOPTS_SO', `confLDOPTS_SO', `-shared')
@@ -110,7 +116,7 @@ COPTS=	-I. ${INCDIRS} ${ENVDEF} ${CCOPTS}
 CFLAGS=	$O ${COPTS} ifdef(`confMT', ifdef(`confMTCFLAGS', `confMTCFLAGS -DXP_MT', `-DXP_MT'), `')
 
 
-BEFORE=	confBEFORE ifdef(`confREQUIRE_LIBSM',`sm_os.h')
+BEFORE=	confBEFORE ifdef(`confREQUIRE_SM_OS_H',`sm_os.h')
 
 LINKS=ifdef(`bldLINK_SOURCES', `bldLINK_SOURCES', `')
 

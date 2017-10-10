@@ -10,7 +10,7 @@ divert(-1)
 #
 #  Definitions for Makefile construction for sendmail
 #
-#	$Id: manpage.m4,v 8.14 2001/06/27 21:46:38 gshapiro Exp $
+#	$Id: manpage.m4,v 8.15 2006/09/07 22:13:07 ca Exp $
 #
 divert(0)dnl
 
@@ -68,9 +68,11 @@ install-docs: ${MANPAGES}
 ifdef(`confNO_MAN_INSTALL', `divert(-1)', `dnl')
 define(`bldMAN_INSTALL_CMD', 
 `ifdef(`confDONT_INSTALL_CATMAN', `dnl', 
-`	${INSTALL} -c -o ${MANOWN} -g ${MANGRP} -m ${MANMODE} bldGET_MAN_BASE_NAME($1).`${MAN'bldGET_MAN_SOURCE_NUM($1)`SRC}' `${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)}/bldGET_MAN_BASE_NAME($1)`.${MAN'bldGET_MAN_SOURCE_NUM($1)`EXT}'')
+`	ifdef(`confMKDIR', `if [ ! -d ${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)`SRC} ]; then confMKDIR -p ${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)`SRC}; else :; fi ')
+	${INSTALL} -c -o ${MANOWN} -g ${MANGRP} -m ${MANMODE} bldGET_MAN_BASE_NAME($1).`${MAN'bldGET_MAN_SOURCE_NUM($1)`SRC}' `${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)}/bldGET_MAN_BASE_NAME($1)`.${MAN'bldGET_MAN_SOURCE_NUM($1)`EXT}'')
 ifdef(`confINSTALL_RAWMAN', 
-`	${INSTALL} -c -o ${MANOWN} -g ${MANGRP} -m ${MANMODE} bldGET_MAN_BASE_NAME($1).bldGET_MAN_SOURCE_NUM($1) `${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)`MAN}'/bldGET_MAN_BASE_NAME($1)`.${MAN'bldGET_MAN_SOURCE_NUM($1)`EXT}'', `dnl')'
+`	ifdef(`confMKDIR', `if [ ! -d ${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)`MAN} ]; then confMKDIR -p ${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)`MAN}; else :; fi ')
+	${INSTALL} -c -o ${MANOWN} -g ${MANGRP} -m ${MANMODE} bldGET_MAN_BASE_NAME($1).bldGET_MAN_SOURCE_NUM($1) `${DESTDIR}${MAN'bldGET_MAN_SOURCE_NUM($1)`MAN}'/bldGET_MAN_BASE_NAME($1)`.${MAN'bldGET_MAN_SOURCE_NUM($1)`EXT}'', `dnl')'
 )dnl
 bldFOREACH(`bldMAN_INSTALL_CMD(', `bldMAN_PAGES')
 ifdef(`confNO_MAN_INSTALL', `divert(0)', `dnl')

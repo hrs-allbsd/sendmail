@@ -88,7 +88,15 @@ confCC		    cc			The C compiler to use.
 confCCOPTS	    [empty]		Additional options to pass to confCC.
 *confCCOPTS_SO	    -fPIC		Additional options for compiling
 					shared object libraries.
+confCCLINK	    confCC		Linker to use (for executables).
 confCOPY	    cp			A program that copies files.
+confMKDIR	    [empty]		A program that creates directories
+					(mkdir) and takes the -p parameter
+					to create also intermediate directories
+					as required.  If this macro is set,
+					then it used by "make install" to
+					create the required installation
+					directories.
 confDEPEND_TYPE	    generic		How to build dependencies.  This should
 					be the name of a file in
 					devtools/M4/depend
@@ -119,8 +127,8 @@ confINSTALL	    install		The BSD-compatible install program.
 					Use ${BUILDBIN}/install.sh if none
 					is available on your system.
 confINSTALL_RAWMAN  [undefined]		Install the unformatted manual pages.
-*confLD		    confCC		Linker to use.
-confLDOPTS	    [empty]		Linker options passed to ld.
+*confLD		    confCC		Linker to use (for libraries).
+confLDOPTS	    [empty]		Linker options.
 *confLDOPTS_SO	    -shared -Wl		Additional linker options for
 					linking shared object libraries.
 confLIBDIR	    /usr/lib		Where to install library files.
@@ -383,4 +391,4 @@ bldSOURCES - This should be defined to a space separated list of C source
 files that make up the library.
 
 
-$Revision: 8.94 $, Last updated $Date: 2002/09/23 21:29:17 $
+$Revision: 8.97 $, Last updated $Date: 2006/10/06 20:51:04 $

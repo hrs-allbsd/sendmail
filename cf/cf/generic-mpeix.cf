@@ -16,8 +16,8 @@
 #####
 #####		SENDMAIL CONFIGURATION FILE
 #####
-##### built by ca@nother.smi.sendmail.com on Mon Aug 7 10:37:31 PDT 2006
-##### in /extra/home/ca/sm-8.13.8/OpenSource/sendmail-8.13.8/cf/cf
+##### built by ca@wiz.smi.sendmail.com on Wed Jan 31 21:15:15 PST 2007
+##### in /extra/home/ca/sm-8.14.0/OpenSource/sendmail-8.14.0/cf/cf
 ##### using ../ as configuration include directory
 #####
 ######################################################################
@@ -42,7 +42,7 @@
 
 
 
-#####  $Id: proto.m4,v 8.719 2006/03/30 20:50:13 ca Exp $  #####
+#####  $Id: proto.m4,v 8.726 2007/01/04 18:27:46 ca Exp $  #####
 
 # level 10 config file format
 V10/Berkeley
@@ -123,7 +123,7 @@ DnMAILER-DAEMON
 CPREDIRECT
 
 # Configuration version number
-DZ8.13.8
+DZ8.14.0
 
 
 ###############
@@ -269,10 +269,11 @@ O PrivacyOptions=authwarnings
 # queue directory
 O QueueDirectory=/var/spool/mqueue
 
-# key for shared memory; 0 to turn off
+# key for shared memory; 0 to turn off, -1 to auto-select
 #O SharedMemoryKey=0
 
-
+# file to store auto-selected key for shared memory (SharedMemoryKey = -1)
+#O SharedMemoryKeyFile
 
 # timeouts (many of these)
 #O Timeout.initial=5m
@@ -323,7 +324,7 @@ O Timeout.queuewarn=4h
 O SuperSafe=True
 
 # status file
-O StatusFile=/etc/mail/statistics
+#O StatusFile
 
 # time zone handling:
 #  if undefined, use system default
@@ -527,6 +528,12 @@ O MaxHeadersLength=32768
 #O DHParameters
 # Random data source (required for systems without /dev/urandom under OpenSSL)
 #O RandFile
+
+# Maximum number of "useless" commands before slowing down
+#O MaxNOOPCommands=20
+
+# Name to use for EHLO (defaults to $j)
+#O HeloName
 
 ############################
 # QUEUE GROUP DEFINITIONS  #
@@ -1051,9 +1058,11 @@ R<? $+> $*		$#error $@ 5.5.4 $: "553 Domain name required for sender address " $
 							...remote is not
 # check results
 R<?> $*			$: @ $1		mark address: nothing known about it
-R<$={ResOk}> $*		$@ <OKR>	domain ok: stop
+R<$={ResOk}> $*		$: @ $2		domain ok
 R<TEMP> $*		$#error $@ 4.1.8 $: "451 Domain of sender address " $&f " does not resolve"
 R<PERM> $*		$#error $@ 5.1.8 $: "553 Domain of sender address " $&f " does not exist"
+
+
 
 ######################################################################
 ###  check_rcpt -- check SMTP `RCPT TO:' command argument
@@ -1153,6 +1162,7 @@ R<@> $+			$:<?>  $[ $1 $]
 R$* .			$1			strip trailing dots
 R<?> $=w		$@ RELAY
 R<?> $* $=R			$@ RELAY
+
 
 
 
@@ -1335,7 +1345,7 @@ Mprog,		P=/bin/sh, F=lsDFMoqeu9, S=EnvFromL/HdrFromL, R=EnvToL/HdrToL, D=$z:/,
 ###   SMTP Mailer specification   ###
 #####################################
 
-#####  $Id: smtp.m4,v 8.64 2001/04/03 01:52:54 gshapiro Exp $  #####
+#####  $Id: smtp.m4,v 8.65 2006/07/12 21:08:10 ca Exp $  #####
 
 #
 #  common sender and masquerading recipient rewriting
