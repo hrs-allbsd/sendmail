@@ -2001,6 +2001,7 @@ extern bool	inittls __P((SSL_CTX **, unsigned long, unsigned long, bool, char *,
 extern bool	initclttls __P((bool));
 extern void	setclttls __P((bool));
 extern bool	initsrvtls __P((bool));
+extern int	tls_reject_renego __P((SSL *));
 extern int	tls_get_info __P((SSL *, bool, char *, MACROS_T *, bool));
 extern int	endtls __P((SSL *, char *));
 extern void	tlslogerr __P((int, const char *));

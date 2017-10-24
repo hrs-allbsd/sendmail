@@ -1621,6 +1621,23 @@ tls_get_info(ssl, srv, host, mac, certreq)
 	return r;
 }
 /*
+**  TLS_REJECT_RENEGO -- Reject any CLIENT-INITIATE Secure Renegotiation proposal
+**
+**	Parameters:
+**		ssl -- SSL connection information.
+**
+**	Returns:
+**		0 -- To reject a TLS handshake in the OpenSSL library.
+*/
+
+int
+tls_reject_renego(ssl)
+	SSL *ssl;
+{
+	SSLerr(SSL_F_SSL_DO_HANDSHAKE, SSL_R_NO_RENEGOTIATION);
+	return 0;
+}
+/*
 **  ENDTLS -- shutdown secure connection
 **
 **	Parameters:
