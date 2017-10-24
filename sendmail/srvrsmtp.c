@@ -2201,6 +2201,9 @@ smtp(nullserver, d_flags, e)
 				goto doquit;
 			}
 
+			/* after this, reject any CLIENT-INITIATE Secure Renegotiation proposal */
+			srv_ssl->handshake_func = &tls_reject_renego;
+
 			/* ignore return code for now, it's in {verify} */
 			(void) tls_get_info(srv_ssl, true,
 					    CurSmtpClient,
