@@ -173,7 +173,7 @@ typedef pthread_cond_t scond_t;
 
 # define MI_POLL_RD_FLAGS (POLLIN | POLLPRI)
 # define MI_POLL_WR_FLAGS (POLLOUT)
-# define MI_MS(timeout)	(((timeout)->tv_sec * 1000) + (timeout)->tv_usec)
+# define MI_MS(timeout) (((timeout)->tv_sec * 1000) + (((timeout)->tv_usec) / 1000))
 
 # define FD_RD_VAR(rds, excs) struct pollfd rds
 # define FD_WR_VAR(wrs) struct pollfd wrs
@@ -197,7 +197,7 @@ typedef pthread_cond_t scond_t;
 # define FD_IS_RD_RDY(sd, rds, excs)			\
 		(((rds).revents & MI_POLL_RD_FLAGS) != 0)
 
-# define FD_WR_READY(sd, excs, timeout)	\
+# define FD_WR_READY(sd, wrs, timeout)	\
 		poll(&(wrs), 1, MI_MS(timeout))
 
 # define FD_RD_READY(sd, rds, excs, timeout)	\

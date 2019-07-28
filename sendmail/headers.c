@@ -1119,24 +1119,7 @@ logsender(e, msgid)
 	register char *sbp;
 	register char *p;
 	char hbuf[MAXNAME + 1];
-	char sbuf[MAXLINE + 1];
-	char mbuf[MAXNAME + 1];
-
-	/* don't allow newlines in the message-id */
-	/* XXX do we still need this? sm_syslog() replaces control chars */
-	if (msgid != NULL)
-	{
-		size_t l;
-
-		l = strlen(msgid);
-		if (l > sizeof(mbuf) - 1)
-			l = sizeof(mbuf) - 1;
-		memmove(mbuf, msgid, l);
-		mbuf[l] = '\0';
-		p = mbuf;
-		while ((p = strchr(p, '\n')) != NULL)
-			*p++ = ' ';
-	}
+	char sbuf[MAXLINE + 1]; /* XREF: see below MSGIDLOGLEN */
 
 	if (bitset(EF_RESPONSE, e->e_flags))
 		name = "[RESPONSE]";
@@ -1160,7 +1143,6 @@ logsender(e, msgid)
 		}
 	}
 
-	/* some versions of syslog only take 5 printf args */
 #if (SYSLOG_BUFSIZE) >= 256
 	sbp = sbuf;
 	(void) sm_snprintf(sbp, SPACELEFT(sbuf, sbp),
@@ -1170,8 +1152,29 @@ logsender(e, msgid)
 	sbp += strlen(sbp);
 	if (msgid != NULL)
 	{
+
+#ifndef MSGIDLOGLEN
+# define MSGIDLOGLEN 100
+# define FIRSTLOGLEN 850
+# else
+#  if MSGIDLOGLEN < 100
+    ERROR MSGIDLOGLEN too short
+#  endif
+/* XREF: this is "sizeof(sbuf)", see above */
+#  if MSGIDLOGLEN >= MAXLINE / 2
+    ERROR MSGIDLOGLEN too long
+#  endif
+
+/* 850 - 100 for original MSGIDLOGLEN */
+#  define FIRSTLOGLEN (750 + MSGIDLOGLEN)
+
+/* check that total length is ok */
+#  if FIRSTLOGLEN + 200 >= MAXLINE
+    ERROR MSGIDLOGLEN too long
+#  endif
+#endif
 		(void) sm_snprintf(sbp, SPACELEFT(sbuf, sbp),
-				", msgid=%.100s", mbuf);
+				", msgid=%.*s", MSGIDLOGLEN, msgid);
 		sbp += strlen(sbp);
 	}
 	if (e->e_bodytype != NULL)
@@ -1210,7 +1213,7 @@ logsender(e, msgid)
 	sbp += strlen(sbp);
 #  endif /* SASL */
 # endif /* _FFR_LOG_MORE1 */
-	sm_syslog(LOG_INFO, e->e_id, "%.850s, relay=%s", sbuf, name);
+	sm_syslog(LOG_INFO, e->e_id, "%.*s, relay=%s", FIRSTLOGLEN, sbuf, name);
 
 #else /* (SYSLOG_BUFSIZE) >= 256 */
 
@@ -1225,7 +1228,7 @@ logsender(e, msgid)
 	if (msgid != NULL)
 		sm_syslog(LOG_INFO, e->e_id,
 			  "msgid=%s",
-			  shortenstring(mbuf, 83));
+			  shortenstring(msgid, 83));
 	sbp = sbuf;
 	*sbp = '\0';
 	if (e->e_bodytype != NULL)
@@ -1879,7 +1882,7 @@ putheader(mci, hdr, e, flags)
 			}
 		}
 
-		if (bitset(H_BCC, h->h_flags))
+		if (bitset(H_BCC, h->h_flags) && !KeepBcc)
 		{
 			/* Bcc: field -- either truncate or delete */
 			if (bitset(EF_DELETE_BCC, e->e_flags))

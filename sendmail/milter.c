@@ -1686,7 +1686,7 @@ milter_set_option(name, val, sticky)
 **		e -- current envelope.
 **
 **	Returns:
-**		0 if succesful, -1 otherwise
+**		0 if successful, -1 otherwise
 */
 
 static int
@@ -1741,7 +1741,7 @@ milter_reopen_df(e)
 **		e -- current envelope.
 **
 **	Returns:
-**		0 if succesful, -1 otherwise
+**		0 if successful, -1 otherwise
 */
 
 static int
@@ -2332,18 +2332,14 @@ milter_getsymlist(m, buf, rlen, offset)
 			macros = MilterMacros[i][m->mf_idx];
 			m->mf_lflags |= MI_LFLAGS_SYM(i);
 			len = strlen(buf + offset);
-			if (len >= 0)
-			{
-				r = milter_set_macros(m->mf_name, macros,
-						buf + offset, nummac);
-				if (r >= 0)
-					nummac = r;
-				if (tTd(64, 5))
-					sm_dprintf("milter_getsymlist(%s, %s, \"%s\")=%d\n",
-						m->mf_name,
-						SM_M_MACRO_NAME(i),
-						buf + offset, r);
-			}
+			r = milter_set_macros(m->mf_name, macros, buf + offset,
+					nummac);
+			if (r >= 0)
+				nummac = r;
+			if (tTd(64, 5))
+				sm_dprintf("milter_getsymlist(%s, %s, \"%s\")=%d\n",
+					m->mf_name, SM_M_MACRO_NAME(i),
+					buf + offset, r);
 			break;
 
 		  default:
@@ -2441,8 +2437,7 @@ milter_negotiate(m, e, milters)
 			sm_syslog(LOG_ERR, e->e_id,
 				  "Milter (%s): negotiate: returned %c instead of %c",
 				  m->mf_name, rcmd, SMFIC_OPTNEG);
-		if (response != NULL)
-			sm_free(response); /* XXX */
+		SM_FREE(response);
 		milter_error(m, e);
 		return -1;
 	}
@@ -2457,8 +2452,7 @@ milter_negotiate(m, e, milters)
 			sm_syslog(LOG_ERR, e->e_id,
 				  "Milter (%s): negotiate: did not return valid info",
 				  m->mf_name);
-		if (response != NULL)
-			sm_free(response); /* XXX */
+		SM_FREE(response);
 		milter_error(m, e);
 		return -1;
 	}
@@ -2476,8 +2470,7 @@ milter_negotiate(m, e, milters)
 			sm_syslog(LOG_ERR, e->e_id,
 				  "Milter (%s): negotiate: did not return enough info",
 				  m->mf_name);
-		if (response != NULL)
-			sm_free(response); /* XXX */
+		SM_FREE(response);
 		milter_error(m, e);
 		return -1;
 	}
@@ -2593,11 +2586,11 @@ milter_negotiate(m, e, milters)
 	if (tTd(64, 5))
 		sm_dprintf("milter_negotiate(%s): received: version %u, fflags 0x%x, pflags 0x%x\n",
 			m->mf_name, m->mf_fvers, m->mf_fflags, m->mf_pflags);
+	SM_FREE(response);
 	return 0;
 
   error:
-	if (response != NULL)
-		sm_free(response); /* XXX */
+	SM_FREE(response);
 	return -1;
 }
 
@@ -3195,8 +3188,9 @@ milter_changeheader(m, response, rlen, e)
 				 !bitset(H_TRACE, h->h_flags))
 			{
 				/*
-				**  DRUMS msg-fmt draft says can only have
-				**  multiple occurences of trace fields,
+				**  RFC 2822:
+				**    27. No multiple occurrences of fields
+				**        (except resent and received).*
 				**  so make sure we replace any non-trace,
 				**  non-user field.
 				*/
@@ -3233,6 +3227,7 @@ milter_changeheader(m, response, rlen, e)
 			addheader(newstr(field), mh_value, H_USER, e,
 				!bitset(SMFIP_HDR_LEADSPC, m->mf_pflags));
 		}
+		SM_FREE(mh_value);
 		return;
 	}
 
@@ -3441,6 +3436,8 @@ milter_chgfrom(response, rlen, e)
 	{
 		if (tTd(64, 10))
 			sm_dprintf("didn't follow protocol argc=%d\n", argc);
+		if (argv != NULL)
+			free(argv);
 		return;
 	}
 
@@ -3459,6 +3456,7 @@ milter_chgfrom(response, rlen, e)
 				mail_esmtp_args);
 	}
 	Errors = olderrors;
+	free(argv);
 	return;
 }
 
@@ -3506,6 +3504,8 @@ milter_addrcpt_par(response, rlen, e)
 	{
 		if (tTd(64, 10))
 			sm_dprintf("didn't follow protocol argc=%d\n", argc);
+		if (argv != NULL)
+			free(argv);
 		return;
 	}
 	olderrors = Errors;
@@ -3530,6 +3530,7 @@ milter_addrcpt_par(response, rlen, e)
 	}
 
 	Errors = olderrors;
+	free(argv);
 	return;
 }
 
@@ -3601,6 +3602,8 @@ milter_delrcpt(response, rlen, e)
 	ssize_t rlen;
 	ENVELOPE *e;
 {
+	int r;
+
 	if (tTd(64, 10))
 		sm_dprintf("milter_delrcpt: ");
 
@@ -3623,10 +3626,10 @@ milter_delrcpt(response, rlen, e)
 
 	if (tTd(64, 10))
 		sm_dprintf("%s\n", response);
+	r = removefromlist(response, &e->e_sendqueue, e);
 	if (MilterLogLevel > 8)
-		sm_syslog(LOG_INFO, e->e_id, "Milter delete: rcpt %s",
-			  response);
-	(void) removefromlist(response, &e->e_sendqueue, e);
+		sm_syslog(LOG_INFO, e->e_id, "Milter delete: rcpt %s, naddrs=%d",
+			  response, r);
 	return;
 }
 
@@ -4164,7 +4167,7 @@ milter_envfrom(args, e, state)
 **  MILTER_ENVRCPT -- send SMTP RCPT command info to milter filters
 **
 **	Parameters:
-**		args -- SMTP MAIL command args (args[0] == recipient).
+**		args -- SMTP RCPT command args (args[0] == recipient).
 **		e -- current envelope.
 **		state -- return state from response.
 **		rcpt_error -- does RCPT have an error?

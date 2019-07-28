@@ -342,7 +342,7 @@ main(argc, argv)
 			}
 			if (access(cmdbuf, X_OK) < 0)
 			{
-				/* oops....  crack attack possiblity */
+				/* oops....  crack attack possibility */
 				(void) sm_io_fprintf(smioerr, SM_TIME_DEFAULT,
 						     "%s: \"%s\" not available for sendmail programs\n",
 						      prg, cmd);

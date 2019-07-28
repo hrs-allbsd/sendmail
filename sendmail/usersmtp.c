@@ -72,6 +72,9 @@ smtpinit(m, mci, e, onlyhelo)
 	int state;
 	register char *p;
 	register char *hn;
+#if _FFR_EXPAND_HELONAME
+	char hnbuf[MAXNAME + 1];
+#endif
 	char *enhsc;
 
 	enhsc = NULL;
@@ -156,7 +159,17 @@ smtpinit(m, mci, e, onlyhelo)
 helo:
 	if (bitnset(M_ESMTP, m->m_flags) || bitnset(M_LMTP, m->m_flags))
 		mci->mci_flags |= MCIF_ESMTP;
-	hn = mci->mci_heloname ? mci->mci_heloname : MyHostName;
+	if (mci->mci_heloname != NULL)
+	{
+#if _FFR_EXPAND_HELONAME
+		expand(mci->mci_heloname, hnbuf, sizeof(hnbuf), e);
+		hn = hnbuf;
+#else
+		hn = mci->mci_heloname;
+#endif
+	}
+	else
+		hn = MyHostName;
 
 tryhelo:
 #if _FFR_IGNORE_EXT_ON_HELO
@@ -703,7 +716,7 @@ getsasldata(line, firstline, m, mci, e)
 **		rpool -- resource pool for sai.
 **
 **	Returns:
-**		EX_OK -- data succesfully read.
+**		EX_OK -- data successfully read.
 **		EX_UNAVAILABLE -- no valid filename.
 **		EX_TEMPFAIL -- temporary failure.
 */
@@ -736,7 +749,7 @@ readauth(filename, safe, sai, rpool)
 #if !_FFR_ALLOW_SASLINFO
 	/*
 	**  make sure we don't use a program that is not
-	**  accesible to the user who specified a different authinfo file.
+	**  accessible to the user who specified a different authinfo file.
 	**  However, currently we don't pass this info (authinfo file
 	**  specified by user) around, so we just turn off program access.
 	*/
@@ -778,7 +791,7 @@ readauth(filename, safe, sai, rpool)
 #if _FFR_ALLOW_SASLINFO
 		/*
 		**  XXX: make sure we don't read or open files that are not
-		**  accesible to the user who specified a different authinfo
+		**  accessible to the user who specified a different authinfo
 		**  file.
 		*/
 
@@ -837,7 +850,7 @@ readauth(filename, safe, sai, rpool)
 **		sai -- pointer to authinfo (result).
 **
 **	Returns:
-**		EX_OK -- ruleset was succesfully called, data may not
+**		EX_OK -- ruleset was successfully called, data may not
 **			be available, sai must be checked.
 **		EX_UNAVAILABLE -- ruleset unavailable (or failed).
 **		EX_TEMPFAIL -- temporary failure (from ruleset).
@@ -1312,32 +1325,34 @@ getsecret(conn, context, id, psecret)
 int
 #if SASL > 10515
 safesaslfile(context, file, type)
-#else /* SASL > 10515 */
+#else
 safesaslfile(context, file)
-#endif /* SASL > 10515 */
+#endif
 	void *context;
 # if SASL >= 20000
 	const char *file;
-# else /* SASL >= 20000 */
+# else
 	char *file;
-# endif /* SASL >= 20000 */
+# endif
 #if SASL > 10515
 # if SASL >= 20000
 	sasl_verify_type_t type;
-# else /* SASL >= 20000 */
+# else
 	int type;
-# endif /* SASL >= 20000 */
-#endif /* SASL > 10515 */
+# endif
+#endif
 {
 	long sff;
 	int r;
 #if SASL <= 10515
 	size_t len;
-#endif /* SASL <= 10515 */
+#endif
 	char *p;
 
 	if (file == NULL || *file == '\0')
 		return SASL_OK;
+	if (tTd(95, 16))
+		sm_dprintf("safesaslfile=%s\n", file);
 	sff = SFF_SAFEDIRPATH|SFF_NOWLINK|SFF_NOWWFILES|SFF_ROOTOK;
 #if SASL <= 10515
 	if ((p = strrchr(file, '/')) == NULL)
@@ -1747,7 +1762,7 @@ attemptauth(m, mci, e, sai)
 		if (saslresult == SASL_NOMECH && LogLevel > 8)
 		{
 			sm_syslog(LOG_NOTICE, e->e_id,
-				  "AUTH=client, available mechanisms do not fulfill requirements");
+				  "AUTH=client, available mechanisms=%s do not fulfill requirements", mci->mci_saslcap);
 		}
 		return EX_TEMPFAIL;
 	}
@@ -2555,8 +2570,6 @@ smtpdata(m, mci, e, ctladdr, xstart)
 		/* pick up any pending RCPT responses for SMTP pipelining */
 		while (mci->mci_nextaddr != NULL)
 		{
-			int r;
-
 			e->e_to = mci->mci_nextaddr->q_paddr;
 			r = smtprcptstat(mci->mci_nextaddr, m, mci, e);
 			if (r != EX_OK)
@@ -3081,7 +3094,19 @@ reply(m, mci, e, timeout, pfunc, enhstat, rtype)
 		(void) sm_io_flush(mci->mci_out, SM_TIME_DEFAULT);
 
 	if (tTd(18, 1))
-		sm_dprintf("reply\n");
+	{
+		char *what;
+
+		if (SmtpMsgBuffer[0] != '\0')
+			what = SmtpMsgBuffer;
+		else if (SmtpPhase != NULL && SmtpPhase[0] != '\0')
+			what = SmtpPhase;
+		else if (XS_GREET == rtype)
+			what = "greeting";
+		else
+			what = "unknown";
+		sm_dprintf("reply to %s\n", what);
+	}
 
 	/*
 	**  Read the input line, being careful not to hang.
@@ -3251,13 +3276,15 @@ reply(m, mci, e, timeout, pfunc, enhstat, rtype)
 			continue;
 		}
 #if _FFR_ERRCODE
+		if (REPLYTYPE(r) > 3 && firstline
 # if _FFR_PROXY
-		if ((e->e_rcode == 0 || REPLYTYPE(e->e_rcode) < 5)
-		    && REPLYTYPE(r) > 3 && firstline)
+		    &&
+		    (e->e_sendmode != SM_PROXY
+		     || (e->e_sendmode == SM_PROXY
+		         && (e->e_rcode == 0 || REPLYTYPE(e->e_rcode) < 5))
+		    )
 # endif
-# if _FFR_LOGREPLY
-		if (REPLYTYPE(r) > 3 && firstline)
-# endif
+		   )
 		{
 			int o = -1;
 # if PIPELINING
@@ -3281,14 +3308,25 @@ reply(m, mci, e, timeout, pfunc, enhstat, rtype)
 				}
 				else
 					o = 4;
-				e->e_rcode = r;
-				e->e_text = sm_rpool_strdup_x(e->e_rpool,
-							      bufp + o);
+
+				/*
+				**  Don't use this for reply= logging
+				**  if it was for QUIT.
+				**  (Note: use the debug option to
+				**  reproduce the original error.)
+				*/
+
+				if (rtype != XS_QUIT || tTd(87, 101))
+				{
+					e->e_rcode = r;
+					e->e_text = sm_rpool_strdup_x(
+							e->e_rpool, bufp + o);
+				}
 			}
 			if (tTd(87, 2))
 			{
-				sm_dprintf("user: offset=%d, bufp=%s, rcode=%d, enhstat=%s, text=%s\n",
-					o, bufp, r, e->e_renhsc, e->e_text);
+				sm_dprintf("user: e=%p, offset=%d, bufp=%s, rcode=%d, enhstat=%s, rtype=%d, text=%s\n"
+					, e, o, bufp, r, e->e_renhsc, rtype, e->e_text);
 			}
 		}
 #endif /* _FFR_ERRCODE */

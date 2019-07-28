@@ -362,6 +362,33 @@ expand(s, buf, bufsize, e)
 }
 
 /*
+**  MACTABCLEAR -- clear entire macro table
+**
+**	Parameters:
+**		mac -- Macro table.
+**
+**	Returns:
+**		none.
+**
+**	Side Effects:
+**		clears entire mac structure including rpool pointer!
+*/
+
+void
+mactabclear(mac)
+	MACROS_T *mac;
+{
+	int i;
+
+	if (mac->mac_rpool == NULL)
+	{
+		for (i = 0; i < MAXMACROID; i++)
+			SM_FREE_CLR(mac->mac_table[i]);
+	}
+	memset((char *) mac, '\0', sizeof(*mac));
+}
+
+/*
 **  MACDEFINE -- bind a macro name to a value
 **
 **	Set a macro to a value, with fancy storage management.
@@ -539,6 +566,15 @@ macvalue(n, e)
 			break;
 		e = e->e_parent;
 	}
+#if _FFR_BLANKENV_MACV
+	if (LOOKUP_MACRO_IN_BLANKENV && e != &BlankEnvelope)
+	{
+		char *p = BlankEnvelope.e_macro.mac_table[n];
+
+		if (p != NULL)
+			return p;
+	}
+#endif
 	return GlobalMacros.mac_table[n];
 }
 

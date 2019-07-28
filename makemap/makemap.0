@@ -14,14 +14,21 @@ DDEESSCCRRIIPPTTIIOONN
        sendmail(8).   It  reads input from the standard input and outputs them
        to the indicated _m_a_p_n_a_m_e_.
 
-       Depending on how it is compiled, mmaakkeemmaapp handles up to three  different
-       database formats, selected using the _m_a_p_t_y_p_e parameter.  They may be
+       Depending on how it is compiled,  mmaakkeemmaapp  handles  different  database
+       formats, selected using the _m_a_p_t_y_p_e parameter.  They may be
 
        dbm    DBM format maps.  This requires the ndbm(3) library.
 
        btree  B-Tree  format maps.  This requires the new Berkeley DB library.
 
        hash   Hash format maps.  This also requires the Berkeley DB library.
+
+       cdb    CDB (Constant DataBase) format maps.  This requires the  tinycdb
+              library.
+
+       implicit
+              The  first  available  format in the following order: hash, dbm,
+              and cdb.
 
        In all cases, mmaakkeemmaapp reads lines from the standard input consisting of
        two words separated by white space.  The first is the database key, the
@@ -63,21 +70,26 @@ DDEESSCCRRIIPPTTIIOONN
        --ll     List supported map types.
 
        --oo     Append to an old file.  This allows you to augment  an  existing
-              file.
+              file.   Note: this might not be supported by all database types,
+              e.g., cdb.
 
-       --rr     Allow  replacement of existing keys.  Normally mmaakkeemmaapp complains
+       --rr     Allow replacement of existing keys.  Normally mmaakkeemmaapp  complains
               if you repeat a key, and does not do the insert.
 
-       --ss     Ignore safety checks  on  maps  being  created.   This  includes
-              checking  for  hard or symbolic links in world writable directo-
+       --ss     Ignore  safety  checks  on  maps  being  created.  This includes
+              checking for hard or symbolic links in world  writable  directo-
               ries.
 
-       --tt     Use the specified delimiter instead of  white  space  (also  for
+       --tt     Use  the  specified  delimiter  instead of white space (also for
               dumping a map).
 
        --uu     dump (unmap) the content of the database to standard output.
 
        --vv     Verbosely print what it is doing.
+
+
+EExxaammppllee
+       makemap hash /etc/mail/access < /etc/mail/access
 
 SSEEEE AALLSSOO
        sendmail(8), newaliases(1)

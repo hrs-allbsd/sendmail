@@ -782,6 +782,7 @@ number:			if ((dprec = prec) >= 0)
 done:
 	FLUSH();
 error:
+	SM_VA_END_COPY(orgap);
 	if ((argtable != NULL) && (argtable != statargtable))
 		sm_free(argtable);
 	return sm_error(fp) ? SM_IO_EOF : ret;

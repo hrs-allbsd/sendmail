@@ -95,7 +95,7 @@ static int sm_lflush __P((SM_FILE_T *, int *));
 		errno = EAGAIN;						\
 		return SM_IO_EOF;					\
 	}								\
-	/* calulate wall-clock time used */				\
+	/* calculate wall-clock time used */				\
 	if (gettimeofday(&sm_io_to_after, NULL) < 0)			\
 		return SM_IO_EOF;					\
 	timersub(&sm_io_to_after, &sm_io_to_before, &sm_io_to_diff);	\

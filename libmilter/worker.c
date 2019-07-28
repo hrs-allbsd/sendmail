@@ -143,7 +143,7 @@ static int mi_list_del_ctx __P((SMFICTX_PTR));
 # define POOL_LEV_DPRINTF(lev, x)					\
 	do								\
 	{								\
-		if ((lev) < ctx->ctx_dbg)				\
+		if (ctx != NULL && (lev) < ctx->ctx_dbg)		\
 			sm_dprintf x;					\
 	} while (0)
 #else /* POOL_DEBUG */
@@ -380,8 +380,6 @@ mi_pool_controller(arg)
 		SMFICTX_PTR ctx;
 		int nfd, r, i;
 		time_t now;
-
-		POOL_LEV_DPRINTF(4, ("Let's %s again...", WAITFN));
 
 		if (mi_stop() != MILTER_CONT)
 			break;

@@ -840,19 +840,6 @@ readaliases(map, af, announcestats, logstats)
 			if (rhssize > longest)
 				longest = rhssize;
 		}
-
-#if 0
-	/*
-	**  address strings are now stored in the envelope rpool,
-	**  and therefore cannot be freed.
-	*/
-		if (al.q_paddr != NULL)
-			sm_free(al.q_paddr);  /* disabled */
-		if (al.q_host != NULL)
-			sm_free(al.q_host);  /* disabled */
-		if (al.q_user != NULL)
-			sm_free(al.q_user);  /* disabled */
-#endif /* 0 */
 	}
 
 	CurEnv->e_to = NULL;

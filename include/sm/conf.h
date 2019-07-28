@@ -626,7 +626,7 @@ extern long	dgux_inet_addr();
 **  OSF/1 for Intel Paragon.
 **
 **	Contributed by Jeff A. Earickson <jeff@ssd.intel.com>
-**	of Intel Scalable Systems Divison.
+**	of Intel Scalable Systems Division.
 */
 
 # ifdef __PARAGON__
@@ -1019,7 +1019,9 @@ extern unsigned int sleepX __P((unsigned int seconds));
 #   if __FreeBSD__ >= 2
 #    include <osreldate.h>
 #    if __FreeBSD_version >= 199512	/* 2.2-current when it appeared */
-#     include <libutil.h>
+#     if __FreeBSD_version < 500012	/* Moved to libc in 2000 */
+#      include <libutil.h>
+#     endif /* __FreeBSD_version < 500012 */
 #     define SPT_TYPE	SPT_BUILTIN
 #    endif /* __FreeBSD_version >= 199512 */
 #    if __FreeBSD_version >= 222000	/* 2.2.2-release and later */
@@ -1731,7 +1733,7 @@ typedef int		pid_t;
 **  Cray UNICOS, UNICOS/mk, and UNICOS/mp
 **
 **    UNICOS:
-**	Ported by David L. Kensiski, Sterling Sofware <kensiski@nas.nasa.gov>
+**	Ported by David L. Kensiski, Sterling Software <kensiski@nas.nasa.gov>
 **	Update Brian Ginsbach <ginsbach@cray.com>
 **    UNICOS/mk (Cray T3E):
 **	Contributed by Manu Mahonen <mailadm@csc.fi>

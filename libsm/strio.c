@@ -235,7 +235,7 @@ sm_stropen(fp, info, flags, rpool)
 	s->strio_offset = 0;
 	s->strio_size = 0;
 	s->strio_base = NULL;
-	s->strio_end = 0;
+	s->strio_end = NULL;
 
 	switch (flags)
 	{

@@ -134,6 +134,7 @@ parseaddr(addr, a, flags, delim, delimptr, e, isrcpt)
 	*/
 
 	qup = false;
+	e->e_flags |= EF_SECURE;
 	if (REWRITE(pvp, 3, e) == EX_TEMPFAIL)
 		qup = true;
 	if (REWRITE(pvp, 0, e) == EX_TEMPFAIL)
@@ -165,6 +166,7 @@ parseaddr(addr, a, flags, delim, delimptr, e, isrcpt)
 	*/
 
 	allocaddr(a, flags, addr, e);
+	e->e_flags &= ~EF_SECURE;
 	if (QS_IS_BADADDR(a->q_state))
 	{
 		/* weed out bad characters in the printable address too */
@@ -218,7 +220,7 @@ parseaddr(addr, a, flags, delim, delimptr, e, isrcpt)
 			msg = "Deferring message until queue run";
 		if (tTd(20, 1))
 			sm_dprintf("parseaddr: queueing message\n");
-		message(msg);
+		message("%s", msg);
 		if (e->e_message == NULL && e->e_sendmode != SM_DEFER)
 			e->e_message = sm_rpool_strdup_x(e->e_rpool, msg);
 		a->q_state = QS_QUEUEUP;
@@ -416,7 +418,7 @@ allocaddr(a, flags, paddr, e)
 	ENVELOPE *e;
 {
 	if (tTd(24, 4))
-		sm_dprintf("allocaddr(flags=%x, paddr=%s)\n", flags, paddr);
+		sm_dprintf("allocaddr(flags=%x, paddr=%s, ad=%d)\n", flags, paddr, bitset(EF_SECURE, e->e_flags));
 
 	a->q_paddr = paddr;
 
@@ -424,6 +426,9 @@ allocaddr(a, flags, paddr, e)
 		a->q_user = "";
 	if (a->q_host == NULL)
 		a->q_host = "";
+
+	if (bitset(EF_SECURE, e->e_flags))
+		a->q_flags |= QSECURE;
 
 	if (bitset(RF_COPYPARSE, flags))
 	{
@@ -1805,6 +1810,7 @@ map_lookup(smap, key, argvect, pstat, e)
 
 	map = &smap->s_map;
 	DYNOPENMAP(map);
+	map->map_mflags |= MF_SECURE;	/* default: secure */
 
 	if (e->e_sendmode == SM_DEFER &&
 	    bitset(MF_DEFER, map->map_mflags))
@@ -1834,10 +1840,15 @@ map_lookup(smap, key, argvect, pstat, e)
 		sm_dprintf(") => ");
 	}
 	replac = (*map->map_class->map_lookup)(map, key, argvect, &status);
+	if (bitset(MF_SECURE, map->map_mflags))
+		map->map_mflags &= ~MF_SECURE;
+	else
+		e->e_flags &= ~EF_SECURE;
+
 	if (tTd(60, 1))
-		sm_dprintf("%s (%d)\n",
+		sm_dprintf("%s (%d), ad=%d\n",
 			replac != NULL ? replac : "NOT FOUND",
-			status);
+			status, bitset(MF_SECURE, map->map_mflags));
 
 	/* should recover if status == EX_TEMPFAIL */
 	if (status == EX_TEMPFAIL && !bitset(MF_NODEFER, map->map_mflags))
@@ -2439,6 +2450,10 @@ static struct qflags	AddressFlags[] =
 	{ "QINTBCC",		QINTBCC		},
 	{ "QDYNMAILER",		QDYNMAILER	},
 	{ "QRCPTOK",		QRCPTOK		},
+	{ "QSECURE",		QSECURE		},
+	{ "QTHISPASS",		QTHISPASS	},
+	{ "QRCPTOK",		QRCPTOK		},
+	{ "QQUEUED",		QQUEUED		},
 	{ NULL,			0		}
 };
 
@@ -3083,13 +3098,13 @@ dequote_map(map, name, av, statp)
 int
 rscheck(rwset, p1, p2, e, flags, logl, host, logid, addr, addrstr)
 	char *rwset;
-	char *p1;
-	char *p2;
+	const char *p1;
+	const char *p2;
 	ENVELOPE *e;
 	int flags;
 	int logl;
-	char *host;
-	char *logid;
+	const char *host;
+	const char *logid;
 	ADDRESS *addr;
 	char **addrstr;
 {
@@ -3239,7 +3254,7 @@ rscheck(rwset, p1, p2, e, flags, logl, host, logid, addr, addrstr)
 
 		if (LogLevel > logl)
 		{
-			char *relay;
+			const char *relay;
 			char *p;
 			char lbuf[MAXLINE];
 
@@ -3296,6 +3311,7 @@ rscheck(rwset, p1, p2, e, flags, logl, host, logid, addr, addrstr)
 		sm_exc_raisenew_x(&EtypeQuickAbort, 2);
 	return rstat;
 }
+
 /*
 **  RSCAP -- call rewriting set to return capabilities
 **

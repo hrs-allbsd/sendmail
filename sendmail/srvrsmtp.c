@@ -23,6 +23,7 @@ SM_RCSID("@(#)$Id: srvrsmtp.c,v 8.1016 2013-11-22 20:51:56 ca Exp $")
 #include <sm/fdset.h>
 
 #if SASL || STARTTLS
+# include <tls.h>
 # include "sfsasl.h"
 #endif /* SASL || STARTTLS */
 #if SASL
@@ -35,6 +36,7 @@ static int saslmechs __P((sasl_conn_t *, char **));
 
 static SSL_CTX	*srv_ctx = NULL;	/* TLS server context */
 static SSL	*srv_ssl = NULL;	/* per connection context */
+static tlsi_ctx_T tlsi_ctx;		/* TLS information context */
 
 static bool	tls_ok_srv = false;
 
@@ -76,6 +78,39 @@ static char	*skipword __P((char *volatile, char *));
 static void	setup_smtpd_io __P((void));
 
 #if SASL
+# if _FFR_AUTH_FAIL_LOG_USER
+#  ifndef MAX_AUTH_USER_LEN
+#   define MAX_AUTH_USER_LEN 256
+#  endif
+#  ifndef MAX_AUTH_LOG_LEN
+#   define MAX_AUTH_LOG_LEN 64
+#  endif
+static void get_sasl_user __P((char *, unsigned int, const char *, char *out, size_t));
+#  define RESET_AUTH_FAIL_LOG_USER	\
+	do	\
+	{	\
+		(void) memset(auth_user, 0, sizeof(auth_user));	\
+		(void) memset(auth_user_tmp, 0, sizeof(auth_user_tmp));	\
+		auth_user_len = 0;	\
+	} while (0)
+#  define SET_AUTH_USER_TMP(s, len)	\
+	do	\
+	{	\
+		auth_user_len = SM_MIN(len, MAX_AUTH_USER_LEN-1);	\
+		(void) memcpy(auth_user_tmp, s, auth_user_len);	\
+	} while (0)
+#  define SET_AUTH_USER	\
+	get_sasl_user(auth_user_tmp, auth_user_len, auth_type, auth_user, sizeof(auth_user))
+#  define SET_AUTH_USER_CONDITIONALLY	\
+		if ('\0' == auth_user[0])	\
+			SET_AUTH_USER;
+#  define LOG_AUTH_FAIL_USER ", user=", (int)MAX_AUTH_LOG_LEN, auth_user
+# else /* _FFR_AUTH_FAIL_LOG_USER */
+#  define LOG_AUTH_FAIL_USER "", 0, ""
+#  define SET_AUTH_USER
+#  define SET_AUTH_USER_CONDITIONALLY
+#  define SET_AUTH_USER_TMP(s, len)	
+# endif /* _FFR_AUTH_FAIL_LOG_USER */
 # if SASL >= 20000
 static int reset_saslconn __P((sasl_conn_t **_conn, char *_hostname,
 				char *_remoteip, char *_localip,
@@ -84,6 +119,7 @@ static int reset_saslconn __P((sasl_conn_t **_conn, char *_hostname,
 # define RESET_SASLCONN	\
 	do							\
 	{							\
+		RESET_AUTH_FAIL_LOG_USER;			\
 		result = reset_saslconn(&conn, AuthRealm, remoteip, \
 					localip, auth_id, &ext_ssf); \
 		if (result != SASL_OK)				\
@@ -98,6 +134,7 @@ static int reset_saslconn __P((sasl_conn_t **_conn, char *_hostname,
 # define RESET_SASLCONN	\
 	do							\
 	{							\
+		RESET_AUTH_FAIL_LOG_USER;			\
 		result = reset_saslconn(&conn, AuthRealm, &saddr_r, \
 					&saddr_l, &ext_ssf);	\
 		if (result != SASL_OK)				\
@@ -106,6 +143,10 @@ static int reset_saslconn __P((sasl_conn_t **_conn, char *_hostname,
 
 # endif /* SASL >= 20000 */
 #endif /* SASL */
+
+#if !defined(RESET_AUTH_FAIL_LOG_USER)
+# define RESET_AUTH_FAIL_LOG_USER
+#endif
 
 extern ENVELOPE	BlankEnvelope;
 
@@ -123,7 +164,7 @@ extern ENVELOPE	BlankEnvelope;
 				(s)++
 
 /*
-**  PARSE_ESMTP_ARGS -- parse EMSTP arguments (for MAIL, RCPT)
+**  PARSE_ESMTP_ARGS -- parse ESMTP arguments (for MAIL, RCPT)
 **
 **	Parameters:
 **		e -- the envelope
@@ -770,7 +811,7 @@ smtp(nullserver, d_flags, e)
 	char inp[MAXINPLINE];
 #if MAXINPLINE < MAXLINE
  ERROR _MAXINPLINE must NOT be less than _MAXLINE: MAXINPLINE < MAXLINE
-#endif /* MAXINPLINE < MAXLINE */
+#endif
 	char cmdbuf[MAXLINE];
 #if SASL
 	sasl_conn_t *conn;
@@ -781,6 +822,10 @@ smtp(nullserver, d_flags, e)
 	volatile int authenticating;
 	char *user;
 	char *in, *out2;
+# if _FFR_AUTH_FAIL_LOG_USER
+	char auth_user[MAX_AUTH_USER_LEN], auth_user_tmp[MAX_AUTH_USER_LEN];
+	unsigned int auth_user_len;
+# endif
 # if SASL >= 20000
 	char *auth_id = NULL;
 	const char *out;
@@ -801,7 +846,6 @@ smtp(nullserver, d_flags, e)
 	char *mechlist;
 	volatile unsigned int n_mechs;
 	unsigned int len;
-#else /* SASL */
 #endif /* SASL */
 	int r;
 #if STARTTLS
@@ -811,12 +855,15 @@ smtp(nullserver, d_flags, e)
 	bool saveQuickAbort;
 	bool saveSuprErrs;
 	time_t tlsstart;
+	int ssl_err, tlsret;
+	int save_errno;
+	extern int TLSsslidx;
 #endif /* STARTTLS */
 	volatile unsigned int features;
 #if PIPELINING
 # if _FFR_NO_PIPE
 	int np_log = 0;
-# endif /* _FFR_NO_PIPE */
+# endif
 #endif /* PIPELINING */
 	volatile time_t log_delay = (time_t) 0;
 #if MILTER
@@ -830,8 +877,9 @@ smtp(nullserver, d_flags, e)
 	size_t inplen;
 #if _FFR_BADRCPT_SHUTDOWN
 	int n_badrcpts_adj;
-#endif /* _FFR_BADRCPT_SHUTDOWN */
+#endif
 
+	RESET_AUTH_FAIL_LOG_USER;
 	SevenBitInput_Saved = SevenBitInput;
 	smtp.sm_nrcpts = 0;
 #if MILTER
@@ -892,7 +940,7 @@ smtp(nullserver, d_flags, e)
 #endif /* SASL */
 #if PIPELINING
 		| SRV_OFFER_PIPE
-#endif /* PIPELINING */
+#endif
 #if STARTTLS
 		| (bitnset(D_NOTLS, d_flags) ? SRV_NONE : SRV_OFFER_TLS)
 		| (bitset(TLS_I_NO_VRFY, TLS_Srv_Opts) ? SRV_NONE
@@ -931,6 +979,7 @@ smtp(nullserver, d_flags, e)
 	}
 	else if (strncmp(nullserver, "421 ", 4) == 0)
 	{
+		/* Can't use ("%s", ...) due to message() requirements */
 		message(nullserver);
 		goto doquit;
 	}
@@ -985,7 +1034,7 @@ smtp(nullserver, d_flags, e)
 		if (in != NULL && (
 #   if NETINET6
 		    strcmp(in, "inet6") == 0 ||
-#   endif /* NETINET6 */
+#   endif
 		    strcmp(in, "inet") == 0))
 		{
 			SOCKADDR_LEN_T addrsize;
@@ -1267,7 +1316,7 @@ smtp(nullserver, d_flags, e)
 	if (
 #if STARTTLS
 	    !smtps &&
-#endif /* STARTTLS */
+#endif
 	    *greetcode == '2' && nullserver == NULL)
 	{
 		time_t msecs = 0;
@@ -1336,7 +1385,16 @@ smtp(nullserver, d_flags, e)
 	/* If this an smtps connection, start TLS now */
 	if (smtps)
 	{
+		if (!tls_ok_srv || srv_ctx == NULL)
+		{
+			sm_syslog(LOG_ERR, e->e_id,
+				"smtps: TLS not available, exiting");
+			exit(EX_CONFIG);
+		}
 		Errors = 0;
+		first = true;
+		gothello = false;
+		smtp.sm_gotmail = false;
 		goto starttls;
 	}
 
@@ -1409,7 +1467,7 @@ smtp(nullserver, d_flags, e)
 		e->e_flags &= ~(EF_VRFYONLY|EF_GLOBALERRS);
 #if MILTER
 		milter_cmd_fail = false;
-#endif /* MILTER */
+#endif
 
 		/* setup for the read */
 		e->e_to = NULL;
@@ -1572,16 +1630,18 @@ smtp(nullserver, d_flags, e)
 					inp);
 # if SASL >= 20000
 				sm_free(in);
-# endif /* SASL >= 20000 */
+# endif
 				RESET_SASLCONN;
 				continue;
 			}
 
 # if SASL >= 20000
+			SET_AUTH_USER_TMP(in, inlen);
 			result = sasl_server_step(conn,	in, inlen,
 						  &out, &outlen);
 			sm_free(in);
 # else /* SASL >= 20000 */
+			SET_AUTH_USER_TMP(out, outlen);
 			result = sasl_server_step(conn,	out, outlen,
 						  &out, &outlen, &errstr);
 # endif /* SASL >= 20000 */
@@ -1691,6 +1751,8 @@ smtp(nullserver, d_flags, e)
 			}
 			else if (result == SASL_CONTINUE)
 			{
+				SET_AUTH_USER;
+
 				len = ENC64LEN(outlen);
 				out2 = xalloc(len);
 				result = sasl_encode64(out, outlen, out2, len,
@@ -1717,26 +1779,35 @@ smtp(nullserver, d_flags, e)
 				}
 # if SASL >= 20000
 				sm_free(out2);
-# endif /* SASL >= 20000 */
+# endif
 			}
 			else
 			{
-				/* not SASL_OK or SASL_CONT */
-				message("535 5.7.0 authentication failed");
-				if (LogLevel > 9)
-					sm_syslog(LOG_WARNING, e->e_id,
-						  "AUTH failure (%s): %s (%d) %s, relay=%.100s",
-						  auth_type,
-						  sasl_errstring(result, NULL,
-								 NULL),
-						  result,
+
 # if SASL >= 20000
-						  sasl_errdetail(conn),
-# else /* SASL >= 20000 */
-						  errstr == NULL ? "" : errstr,
-# endif /* SASL >= 20000 */
-						  CurSmtpClient);
-				RESET_SASLCONN;
+#  define SASLERR sasl_errdetail(conn)
+# else
+#  define SASLERR errstr == NULL ? "" : errstr
+# endif
+#define LOGAUTHFAIL	\
+	do	\
+	{	\
+		SET_AUTH_USER_CONDITIONALLY	\
+		message("535 5.7.0 authentication failed");	\
+		if (LogLevel >= 9)	\
+			sm_syslog(LOG_WARNING, e->e_id,	\
+				  "AUTH failure (%s): %s (%d) %s%s%.*s, relay=%.100s",	\
+				  (auth_type != NULL) ? auth_type : "unknown", \
+				  sasl_errstring(result, NULL, NULL),	\
+				  result,	\
+				  SASLERR, \
+				  LOG_AUTH_FAIL_USER,	\
+				  CurSmtpClient);	\
+		RESET_SASLCONN;	\
+	} while (0)
+
+
+				LOGAUTHFAIL;
 				authenticating = SASL_NOT_AUTH;
 			}
 		}
@@ -1849,10 +1920,15 @@ smtp(nullserver, d_flags, e)
 				if (nullserver != NULL)
 				{
 					if (ISSMTPREPLY(nullserver))
+					{
+						/* Can't use ("%s", ...) due to usrerr() requirements */
 						usrerr(nullserver);
+					}
 					else
+					{
 						usrerr("550 5.0.0 %s",
 						       nullserver);
+					}
 				}
 				else
 					usrerr("452 4.4.5 Insufficient disk space; try again later");
@@ -1951,6 +2027,7 @@ smtp(nullserver, d_flags, e)
 				result = sasl_decode64(q, strlen(q), in,
 						       &inlen);
 # endif /* SASL >= 20000 */
+
 				if (result != SASL_OK)
 				{
 					message("501 5.5.4 cannot BASE64 decode '%s'",
@@ -1964,11 +2041,12 @@ smtp(nullserver, d_flags, e)
 					authenticating = SASL_NOT_AUTH;
 # if SASL >= 20000
 					sm_free(in);
-# endif /* SASL >= 20000 */
+# endif
 					in = NULL;
 					inlen = 0;
 					break;
 				}
+				SET_AUTH_USER_TMP(in, inlen);
 			}
 			else
 			{
@@ -1980,33 +2058,19 @@ smtp(nullserver, d_flags, e)
 # if SASL >= 20000
 			result = sasl_server_start(conn, p, in, inlen,
 						   &out, &outlen);
-			if (in != NULL)
-				sm_free(in);
+			SM_FREE(in);
 # else /* SASL >= 20000 */
 			result = sasl_server_start(conn, p, in, inlen,
 						   &out, &outlen, &errstr);
 # endif /* SASL >= 20000 */
 
+			if (p != NULL)
+				auth_type = newstr(p);
 			if (result != SASL_OK && result != SASL_CONTINUE)
 			{
-				message("535 5.7.0 authentication failed");
-				if (LogLevel > 9)
-					sm_syslog(LOG_ERR, e->e_id,
-						  "AUTH failure (%s): %s (%d) %s, relay=%.100s",
-						  p,
-						  sasl_errstring(result, NULL,
-								 NULL),
-						  result,
-# if SASL >= 20000
-						  sasl_errdetail(conn),
-# else /* SASL >= 20000 */
-						  errstr,
-# endif /* SASL >= 20000 */
-						  CurSmtpClient);
-				RESET_SASLCONN;
+				LOGAUTHFAIL;
 				break;
 			}
-			auth_type = newstr(p);
 
 			if (result == SASL_OK)
 			{
@@ -2014,6 +2078,8 @@ smtp(nullserver, d_flags, e)
 				goto authenticated;
 				/* authenticated by the initial response */
 			}
+
+			SET_AUTH_USER;
 
 			/* len is at least 2 */
 			len = ENC64LEN(outlen);
@@ -2040,7 +2106,7 @@ smtp(nullserver, d_flags, e)
 			}
 # if SASL >= 20000
 			sm_free(out2);
-# endif /* SASL >= 20000 */
+# endif
 			break;
 #endif /* SASL */
 
@@ -2057,6 +2123,7 @@ smtp(nullserver, d_flags, e)
 				message("503 5.5.0 TLS not available");
 				break;
 			}
+  starttls:
 			if (!tls_ok_srv)
 			{
 				message("454 4.3.3 TLS not available after start");
@@ -2076,27 +2143,19 @@ smtp(nullserver, d_flags, e)
 				usrerr("454 4.7.0 Please try again later");
 				break;
 			}
-  starttls:
-# if USE_OPENSSL_ENGINE
-			if (!SSLEngineInitialized)
+			if (!TLS_set_engine(SSLEngine, false))
 			{
-				if (!SSL_set_engine(NULL))
-				{
-					sm_syslog(LOG_ERR, NOQID,
-						  "STARTTLS=server, SSL_set_engine=failed");
-					tls_ok_srv = false;
-					message("454 4.3.3 TLS not available right now");
-					break;
-				}
-				else
-					SSLEngineInitialized = true;
+				sm_syslog(LOG_ERR, NOQID,
+					  "STARTTLS=server, engine=%s, TLS_set_engine=failed",
+					  SSLEngine);
+				tls_ok_srv = false;
+				message("454 4.3.3 TLS not available right now");
+				break;
 			}
-# endif /* USE_OPENSSL_ENGINE */
 # if TLS_NO_RSA
 			/*
 			**  XXX do we need a temp key ?
 			*/
-# else /* TLS_NO_RSA */
 # endif /* TLS_NO_RSA */
 
 # if TLS_VRFY_PER_CTX
@@ -2109,22 +2168,37 @@ smtp(nullserver, d_flags, e)
 			TLS_VERIFY_CLIENT();
 # endif /* TLS_VRFY_PER_CTX */
 
+#define SMTLSFAILED				\
+	do {					\
+		SM_SSL_FREE(srv_ssl);		\
+		goto tls_done;			\
+	} while (0)
+
 			if (srv_ssl != NULL)
 				SSL_clear(srv_ssl);
 			else if ((srv_ssl = SSL_new(srv_ctx)) == NULL)
 			{
 				message("454 4.3.3 TLS not available: error generating SSL handle");
-				if (LogLevel > 8)
-					tlslogerr(LOG_WARNING, "server");
+				tlslogerr(LOG_WARNING, 8, "server");
 				goto tls_done;
 			}
-
-			if (get_tls_se_options(e, srv_ssl, true) != 0)
+			if (get_tls_se_options(e, srv_ssl, &tlsi_ctx, true)
+			    != 0)
 			{
 				message("454 4.3.3 TLS not available: error setting options");
-				SSL_free(srv_ssl);
-				srv_ssl = NULL;
-				goto tls_done;
+				SMTLSFAILED;
+			}
+			r = SSL_set_ex_data(srv_ssl, TLSsslidx, &tlsi_ctx);
+			if (0 == r)
+			{
+				if (LogLevel > 5)
+				{
+					sm_syslog(LOG_ERR, NOQID,
+						"STARTTLS=server, error: SSL_set_ex_data failed=%d",
+						r);
+					tlslogerr(LOG_WARNING, 9, "server");
+				}
+				SMTLSFAILED;
 			}
 
 # if !TLS_VRFY_PER_CTX
@@ -2145,61 +2219,64 @@ smtp(nullserver, d_flags, e)
 			    SSL_set_wfd(srv_ssl, wfd) <= 0)
 			{
 				message("454 4.3.3 TLS not available: error set fd");
-				SSL_free(srv_ssl);
-				srv_ssl = NULL;
-				goto tls_done;
+				SMTLSFAILED;
 			}
 			if (!smtps)
 				message("220 2.0.0 Ready to start TLS");
 # if PIPELINING
 			(void) sm_io_flush(OutChannel, SM_TIME_DEFAULT);
-# endif /* PIPELINING */
+# endif
 
 			SSL_set_accept_state(srv_ssl);
 
 			tlsstart = curtime();
-  ssl_retry:
-			if ((r = SSL_accept(srv_ssl)) <= 0)
-			{
-				int i, ssl_err;
-				int save_errno = errno;
 
-				ssl_err = SSL_get_error(srv_ssl, r);
-				i = tls_retry(srv_ssl, rfd, wfd, tlsstart,
+			ssl_err = SSL_ERROR_WANT_READ;
+			save_errno = 0;
+			do
+			{
+				tlsret = tls_retry(srv_ssl, rfd, wfd, tlsstart,
 						TimeOuts.to_starttls, ssl_err,
 						"server");
-				if (i > 0)
-					goto ssl_retry;
-
-				if (LogLevel > 5)
+				if (tlsret <= 0)
 				{
-					unsigned long l;
-					const char *sr;
+					if (LogLevel > 5)
+					{
+						unsigned long l;
+						const char *sr;
 
-					l = ERR_peek_error();
-					sr = ERR_reason_error_string(l);
-					sm_syslog(LOG_WARNING, NOQID,
-						  "STARTTLS=server, error: accept failed=%d, reason=%s, SSL_error=%d, errno=%d, retry=%d, relay=%.100s",
-						  r, sr == NULL ? "unknown"
-								: sr,
-						  ssl_err, save_errno, i,
-						  CurSmtpClient);
-					if (LogLevel > 9)
-						tlslogerr(LOG_WARNING, "server");
+						l = ERR_peek_error();
+						sr = ERR_reason_error_string(l);
+
+						sm_syslog(LOG_WARNING, NOQID,
+							  "STARTTLS=server, error: accept failed=%d, reason=%s, SSL_error=%d, errno=%d, retry=%d, relay=%.100s",
+							  r, sr == NULL ? "unknown"
+									: sr,
+							  ssl_err, save_errno,
+							  tlsret, CurSmtpClient);
+						tlslogerr(LOG_WARNING, 9, "server");
+					}
+					tls_ok_srv = false;
+					SM_SSL_FREE(srv_ssl);
+
+					/*
+					**  according to the next draft of
+					**  RFC 2487 the connection should
+					**  be dropped
+					**
+					**  arrange to ignore any current
+					**  send list
+					*/
+
+					e->e_sendqueue = NULL;
+					goto doquit;
 				}
-				tls_ok_srv = false;
-				SSL_free(srv_ssl);
-				srv_ssl = NULL;
 
-				/*
-				**  according to the next draft of
-				**  RFC 2487 the connection should be dropped
-				*/
-
-				/* arrange to ignore any current send list */
-				e->e_sendqueue = NULL;
-				goto doquit;
-			}
+				r = SSL_accept(srv_ssl);
+				save_errno = 0;
+				if (r <= 0)
+					ssl_err = SSL_get_error(srv_ssl, r);
+			} while (r <= 0);
 
 			/* ignore return code for now, it's in {verify} */
 			(void) tls_get_info(srv_ssl, true,
@@ -2278,7 +2355,7 @@ smtp(nullserver, d_flags, e)
 				tls_active = true;
 # if PIPELINING
 				(void) sm_io_autoflush(InChannel, OutChannel);
-# endif /* PIPELINING */
+# endif
 			}
 			else
 			{
@@ -2452,10 +2529,15 @@ smtp(nullserver, d_flags, e)
 					tempfail = true;
 					smtp.sm_milterize = false;
 					if (response != NULL)
+					{
+						/* Can't use ("%s", ...) due to usrerr() requirements */
 						usrerr(response);
+					}
 					else
+					{
 						message("421 4.7.0 %s closing connection",
 							MyHostName);
+					}
 					/* arrange to ignore send list */
 					e->e_sendqueue = NULL;
 					lognullconnection = false;
@@ -2505,7 +2587,7 @@ smtp(nullserver, d_flags, e)
 #if PIPELINING
 			if (bitset(SRV_OFFER_PIPE, features))
 				message("250-PIPELINING");
-#endif /* PIPELINING */
+#endif
 			if (bitset(SRV_OFFER_EXPN, features))
 			{
 				message("250-EXPN");
@@ -2514,7 +2596,7 @@ smtp(nullserver, d_flags, e)
 			}
 #if MIME8TO7
 			message("250-8BITMIME");
-#endif /* MIME8TO7 */
+#endif
 			if (MaxMessageSize > 0)
 				message("250-SIZE %ld", MaxMessageSize);
 			else
@@ -2522,17 +2604,17 @@ smtp(nullserver, d_flags, e)
 #if DSN
 			if (SendMIMEErrors && bitset(SRV_OFFER_DSN, features))
 				message("250-DSN");
-#endif /* DSN */
+#endif
 			if (bitset(SRV_OFFER_ETRN, features))
 				message("250-ETRN");
 #if SASL
 			if (sasl_ok && mechlist != NULL && *mechlist != '\0')
 				message("250-AUTH %s", mechlist);
-#endif /* SASL */
+#endif
 #if STARTTLS
 			if (tls_ok_srv && bitset(SRV_OFFER_TLS, features))
 				message("250-STARTTLS");
-#endif /* STARTTLS */
+#endif
 			if (DeliverByMin > 0)
 				message("250-DELIVERBY %ld",
 					(long) DeliverByMin);
@@ -2577,6 +2659,7 @@ smtp(nullserver, d_flags, e)
 					sm_syslog(LOG_INFO, e->e_id,
 						  "SMTP MAIL command (%.100s) from %s tempfailed (due to previous checks)",
 						  p, CurSmtpClient);
+				/* Can't use ("%s", ...) due to usrerr() requirements */
 				usrerr(MSG_TEMPFAIL);
 				break;
 			}
@@ -2753,7 +2836,7 @@ smtp(nullserver, d_flags, e)
 			    !enoughdiskspace(e->e_msgsize, e)
 #if _FFR_ANY_FREE_FS
 			    && !filesys_free(e->e_msgsize)
-#endif /* _FFR_ANY_FREE_FS */
+#endif
 			   )
 			{
 				/*
@@ -2908,8 +2991,8 @@ smtp(nullserver, d_flags, e)
 			**  as QS_DONTSEND.
 			*/
 
-			if (!(smtp.sm_milterlist && smtp.sm_milterize &&
-			      !bitset(EF_DISCARD, e->e_flags)) &&
+			if (smtp.sm_milterlist && smtp.sm_milterize &&
+			      !bitset(EF_DISCARD, e->e_flags) &&
 			    (smtp.sm_milters.mis_flags &
 			     (MIS_FL_DEL_RCPT|MIS_FL_REJ_RCPT)) != 0)
 				e->e_flags |= EF_VRFYONLY;
@@ -3081,8 +3164,8 @@ smtp(nullserver, d_flags, e)
 			/* Is this needed? */
 #if !MILTER
 		rcpt_done:
-#endif /* !MILTER */
-		
+#endif
+
 			macdefine(&e->e_macro, A_PERM,
 				macid("{rcpt_mailer}"), NULL);
 			macdefine(&e->e_macro, A_PERM,
@@ -3308,6 +3391,7 @@ smtp(nullserver, d_flags, e)
 					sm_syslog(LOG_INFO, e->e_id,
 						  "SMTP ETRN command (%.100s) from %s tempfailed (due to previous checks)",
 						  p, CurSmtpClient);
+				/* Can't use ("%s", ...) due to usrerr() requirements */
 				usrerr(MSG_TEMPFAIL);
 				break;
 			}
@@ -3404,7 +3488,7 @@ smtp(nullserver, d_flags, e)
 			message("221 2.0.0 %s closing connection", MyHostName);
 #if PIPELINING
 			(void) sm_io_flush(OutChannel, SM_TIME_DEFAULT);
-#endif /* PIPELINING */
+#endif
 
 			if (smtp.sm_nrcpts > 0)
 				logundelrcpts(e, "aborted by sender", 9, false);
@@ -3416,7 +3500,7 @@ smtp(nullserver, d_flags, e)
 			/* shutdown TLS connection */
 			if (tls_active)
 			{
-				(void) endtls(srv_ssl, "server");
+				(void) endtls(&srv_ssl, "server");
 				tls_active = false;
 			}
 #endif /* STARTTLS */
@@ -3436,7 +3520,7 @@ doquit:
 #if MILTER
 			/* close out milter filters */
 			milter_quit(e);
-#endif /* MILTER */
+#endif
 
 			if (tTd(92, 2))
 				sm_dprintf("QUIT: e_id=%s, EF_LOGSENDER=%d, LogLevel=%d\n",
@@ -3574,7 +3658,7 @@ doquit:
 		}
 #if SASL
 		}
-#endif /* SASL */
+#endif
 	    }
 	    SM_EXCEPT(exc, "[!F]*")
 	    {
@@ -3607,7 +3691,7 @@ smtp_data(smtp, e)
 {
 #if MILTER
 	bool milteraccept;
-#endif /* MILTER */
+#endif
 	bool aborting;
 	bool doublequeue;
 	bool rv = true;
@@ -3657,8 +3741,9 @@ smtp_data(smtp, e)
 #if _FFR_MILTER_ENHSC
 			if (ISSMTPCODE(response))
 				(void) extenhsc(response + 4, ' ', e->e_enhsc);
-#endif /* _FFR_MILTER_ENHSC */
+#endif
 
+			/* Can't use ("%s", ...) due to usrerr() requirements */
 			usrerr(response);
 			if (strncmp(response, "421 ", 4) == 0
 			    || strncmp(response, "421-", 4) == 0)
@@ -3678,7 +3763,7 @@ smtp_data(smtp, e)
 #if _FFR_MILTER_ENHSC
 			(void) sm_strlcpy(e->e_enhsc, "5.7.1",
 					 sizeof(e->e_enhsc));
-#endif /* _FFR_MILTER_ENHSC */
+#endif
 			usrerr("550 5.7.1 Command rejected");
 			return true;
 
@@ -3699,7 +3784,8 @@ smtp_data(smtp, e)
 			}
 #if _FFR_MILTER_ENHSC
 			(void) extenhsc(MSG_TEMPFAIL + 4, ' ', e->e_enhsc);
-#endif /* _FFR_MILTER_ENHSC */
+#endif
+			/* Can't use ("%s", ...) due to usrerr() requirements */
 			usrerr(MSG_TEMPFAIL);
 			return true;
 
@@ -3778,7 +3864,8 @@ smtp_data(smtp, e)
 #if _FFR_MILTER_ENHSC
 			if (ISSMTPCODE(response))
 				(void) extenhsc(response + 4, ' ', e->e_enhsc);
-#endif /* _FFR_MILTER_ENHSC */
+#endif
+			/* Can't use ("%s", ...) due to usrerr() requirements */
 			usrerr(response);
 			if (strncmp(response, "421 ", 4) == 0
 			    || strncmp(response, "421-", 4) == 0)
@@ -3809,7 +3896,8 @@ smtp_data(smtp, e)
 			milteraccept = false;
 #if _FFR_MILTER_ENHSC
 			(void) extenhsc(MSG_TEMPFAIL + 4, ' ', e->e_enhsc);
-#endif /* _FFR_MILTER_ENHSC */
+#endif
+			/* Can't use ("%s", ...) due to usrerr() requirements */
 			usrerr(MSG_TEMPFAIL);
 			break;
 
@@ -3994,7 +4082,7 @@ smtp_data(smtp, e)
 #if NAMED_BIND
 	_res.retry = TimeOuts.res_retry[RES_TO_FIRST];
 	_res.retrans = TimeOuts.res_retrans[RES_TO_FIRST];
-#endif /* NAMED_BIND */
+#endif
 
 #if _FFR_PROXY
 	if (SM_PROXY_REQ == e->e_sendmode)
@@ -4164,7 +4252,7 @@ smtp_data(smtp, e)
 		message("250 2.0.0 %s Message accepted for delivery", id);
 #if _FFR_PROXY
 	}
-#endif /* _FFR_PROXY */
+#endif
 	CurEnv->e_id = oldid;
 
 	/* if we just queued, poke it */
@@ -4309,7 +4397,7 @@ logundelrcpts(e, msg, level, all)
 #if _FFR_MILTER_ENHSC
 			    (a->q_status == NULL && e->e_enhsc[0] != '\0')
 			    ? e->e_enhsc :
-#endif /* _FFR_MILTER_ENHSC */
+#endif
 			    a->q_status,
 			    msg, NULL, (time_t) 0, e, a, EX_OK /* ??? */);
 	}
@@ -4542,7 +4630,7 @@ reset_mail_esmtp_args(e)
 # if _FFR_AUTH_PASSING
 	macdefine(&BlankEnvelope.e_macro, A_PERM,
 				  macid("{auth_author}"), NULL);
-# endif /* _FFR_AUTH_PASSING */
+# endif
 #endif /* SASL */
 
 	/* "by" */
@@ -4728,7 +4816,7 @@ mail_esmtp_args(a, kp, vp, e)
 # if _FFR_AUTH_PASSING
 			macdefine(&BlankEnvelope.e_macro, A_PERM,
 				  macid("{auth_author}"), NULL);
-# endif /* _FFR_AUTH_PASSING */
+# endif
 		}
 		else
 		{
@@ -5453,4 +5541,142 @@ reset_saslconn(sasl_conn_t **conn, char *hostname,
 # endif /* SASL >= 20000 */
 	return SASL_OK;
 }
+
+# if _FFR_AUTH_FAIL_LOG_USER
+/*
+**  GET_SASL_USER -- extract user part from SASL reply
+**
+**	Parameters:
+**		val -- sasl reply (may contain NUL)
+**		len -- length of val
+**		auth_type -- auth_type (can be NULL)
+**		user -- output buffer for extract user
+**		user_len -- length of output buffer (user)
+**
+**	Returns:
+**		none.
+**
+**	Note: val is supplied by the client and hence may contain "bad"
+**		(non-printable) characters, but the returned value (user)
+**		is only used for logging which converts those characters.
+*/
+
+static void
+get_sasl_user(val, len, auth_type, user, user_len)
+	char *val;
+	unsigned int len;
+	const char *auth_type;
+	char *user;
+	size_t user_len;
+{
+	unsigned int u;
+
+	SM_ASSERT(val != NULL);
+	SM_ASSERT(user != NULL);
+	SM_ASSERT(user_len > 0);
+
+	*user = '\0';
+	if (NULL == auth_type || '\0' == auth_type)
+		return;
+	if (0 == len)
+		return;
+
+# define DIGMD5U	"username=\""
+# define DIGMD5U_L	(sizeof(DIGMD5U) - 1)
+	if (sm_strcasecmp(auth_type, "digest-md5") == 0 &&
+	    strncmp(val, DIGMD5U, DIGMD5U_L) == 0)
+	{
+		char *s;
+
+		val += DIGMD5U_L;
+		if (len <= DIGMD5U_L)
+			return;
+		len -= DIGMD5U_L;
+
+		/* format? could there be a quoted '"'? */
+		for (s = val, u = 0; *s != '\0' && u < len; s++)
+		{
+			if ('"' == *s)
+			{
+				*s = '\0';
+				break;
+			}
+			if ('\\' == *s)
+			{
+				++s;
+				if ('\0' == *s)
+					break;
+			}
+		}
+	}
+	else if (sm_strcasecmp(auth_type, "cram-md5") == 0)
+	{
+		char *s;
+
+		for (s = val, u = 0; *s != '\0' && u < len; s++)
+		{
+			if (' ' == *s)
+			{
+				*s = '\0';
+				break;
+			}
+		}
+	}
+
+	else if (sm_strcasecmp(auth_type, "plain") == 0 ||
+		 sm_strcasecmp(auth_type, "login") == 0)
+	{
+		/*
+		**  RFC 4616: The PLAIN Simple Authentication and
+		**	Security Layer (SASL) Mechanism
+		**    message   = [authzid] UTF8NUL authcid UTF8NUL passwd
+		**  each part: 1*SAFE ; MUST accept up to 255 octets
+		**  UTF8NUL   = %x00 ; UTF-8 encoded NUL character
+		**
+		**  draft-murchison-sasl-login: it's just username by its own
+		*/
+
+		for (u = 0; u < len; u++)
+		{
+			if (val[u] == '\0')
+			{
+				val[u] = '/';
+				(void) sm_strlcpy(user,
+						val + ((0 == u) ? 1 : 0),
+						user_len);
+				return;
+			}
+		}
+	}
+	else
+	{
+		/*
+		**  Extracting the "user" from other mechanisms
+		**  is currently not supported.
+		*/
+
+		return;
+	}
+
+	/*
+	**  Does the input buffer has an NUL in it so it can be treated
+	**  as a C string?
+	*/
+
+	/* SM_ASSERT(len > 0); see above */
+	u = len - 1;
+	if (val[u] != '\0')
+	{
+		for (u = 0; u < len; u++)
+		{
+			if (val[u] == '\0')
+				break;
+		}
+	}
+	if (val[u] != '\0')
+		user_len = SM_MIN(len, user_len);
+
+	(void) sm_strlcpy(user, val, user_len);
+}
+# endif /* _FFR_AUTH_FAIL_LOG_USER */
 #endif /* SASL */

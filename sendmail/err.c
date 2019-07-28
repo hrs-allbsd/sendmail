@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 1998-2003, 2010 Proofpoint, Inc. and its suppliers.
+ * Copyright (c) 1998-2003, 2010, 2015 Proofpoint, Inc. and its suppliers.
  *	All rights reserved.
  * Copyright (c) 1983, 1995-1997 Eric P. Allman.  All rights reserved.
  * Copyright (c) 1988, 1993
@@ -255,6 +255,7 @@ syserr(fmt, va_alist)
 	if (QuickAbort)
 		sm_exc_raisenew_x(&EtypeQuickAbort, 2);
 }
+
 /*
 **  USRERR -- Signal user error.
 **
@@ -340,6 +341,7 @@ usrerr(fmt, va_alist)
 	if (QuickAbort)
 		sm_exc_raisenew_x(&EtypeQuickAbort, 1);
 }
+
 /*
 **  USRERRENH -- Signal user error.
 **
@@ -438,9 +440,6 @@ usrerrenh(enhsc, fmt, va_alist)
 **
 **	Returns:
 **		none
-**
-**	Side Effects:
-**		none.
 */
 
 /*VARARGS1*/
@@ -493,9 +492,6 @@ message(msg, va_alist)
 **
 **	Returns:
 **		none
-**
-**	Side Effects:
-**		none.
 */
 
 /*VARARGS3*/
@@ -595,9 +591,6 @@ extsc(msg, delim, replycode, enhsc)
 **
 **	Returns:
 **		none
-**
-**	Side Effects:
-**		none.
 */
 
 /*VARARGS1*/
@@ -636,6 +629,7 @@ nmessage(msg, va_alist)
 		break;
 	}
 }
+
 /*
 **  PUTOUTMSG -- output error message to transcript and channel
 **
@@ -761,6 +755,7 @@ putoutmsg(msg, holdmsg, heldmsg)
 			  shortenstring(msg, MAXSHORTSTR), sm_errstring(errno));
 #endif /* !PIPELINING */
 }
+
 /*
 **  PUTERRMSG -- like putoutmsg, but does special processing for error messages
 **
@@ -804,6 +799,7 @@ puterrmsg(msg)
 		CurEnv->e_flags |= EF_FATALERRS;
 	}
 }
+
 /*
 **  ISENHSC -- check whether a string contains an enhanced status code
 **
@@ -814,10 +810,8 @@ puterrmsg(msg)
 **	Returns:
 **		0  -- no enhanced status code.
 **		>4 -- length of enhanced status code.
-**
-**	Side Effects:
-**		none.
 */
+
 int
 isenhsc(s, delim)
 	const char *s;
@@ -843,6 +837,7 @@ isenhsc(s, delim)
 		return 0;
 	return l + h;
 }
+
 /*
 **  EXTENHSC -- check and extract an enhanced status code
 **
@@ -897,6 +892,7 @@ extenhsc(s, delim, e)
 	e[l + h] = '\0';
 	return l + h;
 }
+
 /*
 **  FMTMSG -- format a message into buffer.
 **
@@ -906,14 +902,15 @@ extenhsc(s, delim, e)
 **		num -- default three digit SMTP reply code.
 **		enhsc -- enhanced status code.
 **		en -- the error number to display.
-**		fmt -- format of string.
+**		fmt -- format of string: See NOTE below.
 **		ap -- arguments for fmt.
 **
 **	Returns:
 **		pointer to error text beyond status codes.
 **
-**	Side Effects:
-**		none.
+**	NOTE:
+**		Do NOT use "%s" as fmt if the argument starts with an SMTP
+**		reply code!
 */
 
 static char *
@@ -1026,6 +1023,7 @@ fmtmsg(eb, to, num, enhsc, eno, fmt, ap)
 
 	return errtxt;
 }
+
 /*
 **  BUFFER_ERRORS -- arrange to buffer future error messages
 **
@@ -1042,6 +1040,7 @@ buffer_errors()
 	HeldMessageBuf[0] = '\0';
 	HoldErrs = true;
 }
+
 /*
 **  FLUSH_ERRORS -- flush the held error message buffer
 **
@@ -1070,9 +1069,6 @@ flush_errors(print)
 **
 **	Returns:
 **		A string description of errnum.
-**
-**	Side Effects:
-**		none.
 */
 
 const char *

@@ -1,5 +1,5 @@
 /*
- * Copyright (c) 2000-2004, 2010 Proofpoint, Inc. and its suppliers.
+ * Copyright (c) 2000-2004, 2010, 2015 Proofpoint, Inc. and its suppliers.
  *	All rights reserved.
  *
  * By using this file, you agree to the terms and conditions set
@@ -48,7 +48,10 @@
 #   include <netinet/in_systm.h>
 #   include <netinet/ip.h>
 #  endif /* NETINET */
+#  define _DEFINE_SMR_GLOBALS 1
 #  include "sm_resolve.h"
+
+#include <arpa/inet.h>
 
 SM_RCSID("$Id: sm_resolve.c,v 8.40 2013-11-22 20:51:56 ca Exp $")
 
@@ -71,10 +74,21 @@ static struct stot
 	{	"TXT",		T_TXT		},
 	{	"AFSDB",	T_AFSDB		},
 	{	"SRV",		T_SRV		},
+#  ifdef T_DS
+	{	"DS",		T_DS		},
+#  endif
+	{	"RRSIG",	T_RRSIG		},
+#  ifdef T_NSEC
+	{	"NSEC",		T_NSEC		},
+#  endif
+#  ifdef T_DNSKEY
+	{	"DNSKEY",	T_DNSKEY	},
+#  endif
+	{	"TLSA",		T_TLSA		},
 	{	NULL,		0		}
 };
 
-static DNS_REPLY_T *parse_dns_reply __P((unsigned char *, int));
+static DNS_REPLY_T *parse_dns_reply __P((unsigned char *, int, unsigned int));
 
 /*
 **  DNS_STRING_TO_TYPE -- convert resource record name into type
@@ -138,6 +152,8 @@ dns_free_data(r)
 {
 	RESOURCE_RECORD_T *rr;
 
+	if (r == NULL)
+		return;
 	if (r->dns_r_q.dns_q_domain != NULL)
 		sm_free(r->dns_r_q.dns_q_domain);
 	for (rr = r->dns_r_head; rr != NULL; )
@@ -154,12 +170,53 @@ dns_free_data(r)
 	sm_free(r);
 }
 
+static int
+bin2hex(rr, p, size, min_size)
+	RESOURCE_RECORD_T *rr;
+	unsigned char *p;
+	int size;
+	int min_size;
+{
+	int i, pos, txtlen;
+
+	txtlen = size * 3;
+	if (txtlen <= size || size < min_size)
+	{
+		if (LogLevel > 5)
+			sm_syslog(LOG_WARNING, NOQID,
+				  "ERROR: size %d wrong",
+				  size);
+		return -1;
+	}
+	rr->rr_u.rr_data = (unsigned char*) sm_malloc(txtlen);
+	if (rr->rr_u.rr_data == NULL)
+	{
+		if (tTd(8, 17))
+			sm_dprintf("len=%d, rr_data=NULL\n", txtlen);
+		return -1;
+	}
+	snprintf(rr->rr_u.rr_data, txtlen,
+		"%02X %02X %02X", p[0], p[1], p[2]);
+	pos = strlen(rr->rr_u.rr_data);
+
+	/* why isn't there a print function like strlcat? */
+	for (i = 3; i < size && pos < txtlen; i++, pos += 3)
+	{
+		snprintf(rr->rr_u.rr_data + pos,
+			txtlen - pos, "%c%02X",
+			(i == 3) ? ' ' : ':', p[i]);
+	}
+
+	return i;
+}
+
 /*
 **  PARSE_DNS_REPLY -- parse DNS reply data.
 **
 **	Parameters:
 **		data -- pointer to dns data
 **		len -- len of data
+**		flags -- various flags
 **
 **	Returns:
 **		pointer to DNS_REPLY_T if succeeded.
@@ -167,9 +224,10 @@ dns_free_data(r)
 */
 
 static DNS_REPLY_T *
-parse_dns_reply(data, len)
+parse_dns_reply(data, len, flags)
 	unsigned char *data;
 	int len;
+	unsigned int flags;
 {
 	unsigned char *p;
 	unsigned short ans_cnt, ui;
@@ -191,18 +249,14 @@ parse_dns_reply(data, len)
 	p += sizeof(r->dns_r_h);
 	status = dn_expand(data, data + len, p, host, sizeof(host));
 	if (status < 0)
-	{
-		dns_free_data(r);
-		return NULL;
-	}
+		goto error;
 	r->dns_r_q.dns_q_domain = sm_strdup(host);
 	if (r->dns_r_q.dns_q_domain == NULL)
-	{
-		dns_free_data(r);
-		return NULL;
-	}
+		goto error;
 
 	ans_cnt = ntohs((unsigned short) r->dns_r_h.ancount);
+	if (tTd(8, 17))
+		sm_dprintf("parse_dns_reply: ad=%d\n", r->dns_r_h.ad);
 
 	p += status;
 	GETSHORT(r->dns_r_q.dns_q_type, p);
@@ -215,10 +269,7 @@ parse_dns_reply(data, len)
 
 		status = dn_expand(data, data + len, p, host, sizeof(host));
 		if (status < 0)
-		{
-			dns_free_data(r);
-			return NULL;
-		}
+			goto error;
 		++ui;
 		p += status;
 		GETSHORT(type, p);
@@ -236,22 +287,15 @@ parse_dns_reply(data, len)
 				sm_syslog(LOG_WARNING, NOQID,
 					  "ERROR: DNS RDLENGTH=%d > data len=%d",
 					  size, len - (int)(p - data));
-			dns_free_data(r);
-			return NULL;
+			goto error;
 		}
 		*rr = (RESOURCE_RECORD_T *) sm_malloc(sizeof(**rr));
 		if (*rr == NULL)
-		{
-			dns_free_data(r);
-			return NULL;
-		}
+			goto error;
 		memset(*rr, 0, sizeof(**rr));
 		(*rr)->rr_domain = sm_strdup(host);
 		if ((*rr)->rr_domain == NULL)
-		{
-			dns_free_data(r);
-			return NULL;
-		}
+			goto error;
 		(*rr)->rr_type = type;
 		(*rr)->rr_class = class;
 		(*rr)->rr_ttl = ttl;
@@ -264,16 +308,10 @@ parse_dns_reply(data, len)
 			status = dn_expand(data, data + len, p, host,
 					   sizeof(host));
 			if (status < 0)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			(*rr)->rr_u.rr_txt = sm_strdup(host);
 			if ((*rr)->rr_u.rr_txt == NULL)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			break;
 
 		  case T_MX:
@@ -281,18 +319,12 @@ parse_dns_reply(data, len)
 			status = dn_expand(data, data + len, p + 2, host,
 					   sizeof(host));
 			if (status < 0)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			l = strlen(host) + 1;
 			(*rr)->rr_u.rr_mx = (MX_RECORD_T *)
 				sm_malloc(sizeof(*((*rr)->rr_u.rr_mx)) + l);
 			if ((*rr)->rr_u.rr_mx == NULL)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			(*rr)->rr_u.rr_mx->mx_r_preference = (p[0] << 8) | p[1];
 			(void) sm_strlcpy((*rr)->rr_u.rr_mx->mx_r_domain,
 					  host, l);
@@ -302,18 +334,12 @@ parse_dns_reply(data, len)
 			status = dn_expand(data, data + len, p + 6, host,
 					   sizeof(host));
 			if (status < 0)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			l = strlen(host) + 1;
 			(*rr)->rr_u.rr_srv = (SRV_RECORDT_T*)
 				sm_malloc(sizeof(*((*rr)->rr_u.rr_srv)) + l);
 			if ((*rr)->rr_u.rr_srv == NULL)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			(*rr)->rr_u.rr_srv->srv_r_priority = (p[0] << 8) | p[1];
 			(*rr)->rr_u.rr_srv->srv_r_weight = (p[2] << 8) | p[3];
 			(*rr)->rr_u.rr_srv->srv_r_port = (p[4] << 8) | p[5];
@@ -340,26 +366,32 @@ parse_dns_reply(data, len)
 					sm_syslog(LOG_WARNING, NOQID,
 						  "ERROR: DNS TXT record size=%d <= text len=%d",
 						  size, txtlen);
-				dns_free_data(r);
-				return NULL;
+				goto error;
 			}
 			(*rr)->rr_u.rr_txt = (char *) sm_malloc(txtlen + 1);
 			if ((*rr)->rr_u.rr_txt == NULL)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			(void) sm_strlcpy((*rr)->rr_u.rr_txt, (char*) p + 1,
 					  txtlen + 1);
 			break;
 
+#ifdef T_TLSA
+		  case T_TLSA:
+			if ((flags & RR_AS_TEXT) != 0)
+			{
+				txtlen = bin2hex(*rr, p, size, 4);
+				if (txtlen <= 0)
+					goto error;
+				break;
+			}
+			/* FALLTHROUGH */
+			/* return "raw" data for caller to use as it pleases */
+#endif /* T_TLSA */
+
 		  default:
 			(*rr)->rr_u.rr_data = (unsigned char*) sm_malloc(size);
 			if ((*rr)->rr_u.rr_data == NULL)
-			{
-				dns_free_data(r);
-				return NULL;
-			}
+				goto error;
 			(void) memcpy((*rr)->rr_u.rr_data, p, size);
 			break;
 		}
@@ -368,7 +400,98 @@ parse_dns_reply(data, len)
 	}
 	*rr = NULL;
 	return r;
+
+  error:
+	dns_free_data(r);
+	return NULL;
 }
+
+#if DNSSEC_TEST
+/*
+**  NSPORTIP -- parse port@IPv4 and set NS accordingly
+**
+**	Parameters:
+**		p -- port@Ipv4
+**
+**	Returns:
+**		<0: error
+**		>0: ok
+**
+**	Side Effects:
+**		sets NS for DNS lookups
+*/
+
+/*
+**  There should be a generic function for this...
+**  milter_open(), socket_map_open(), others?
+*/
+
+int
+nsportip(p)
+	char *p;
+{
+	char *h;
+	int r;
+	unsigned short port;
+	struct in_addr nsip;
+
+	if (p == NULL || *p == '\0')
+		return -1;
+
+	port = 0;
+	while (isascii(*p) && isspace(*p))
+		p++;
+	if (*p == '\0')
+		return -1;
+	h = strchr(p, '@');
+	if (h != NULL)
+	{
+		*h = '\0';
+		if (isascii(*p) && isdigit(*p))
+			port = atoi(p);
+		*h = '@';
+		p = h + 1;
+	}
+	h = strchr(p, ' ');
+	if (h != NULL)
+		*h = '\0';
+	r = inet_pton(AF_INET, p, &nsip);
+	if (r > 0)
+	{
+		if ((_res.options & RES_INIT) == 0)
+			(void) res_init();
+		dns_setns(&nsip, port);
+	}
+	if (h != NULL)
+		*h = ' ';
+	return r > 0 ? 0 : -1;
+}
+
+/*
+**  DNS_SETNS -- set one NS in resolver context
+**
+**	Parameters:
+**		ns -- (IPv4 address of) nameserver
+**		port -- nameserver port
+**
+**	Returns:
+**		None.
+*/
+
+void
+dns_setns(ns, port)
+	struct in_addr *ns;
+	unsigned int port;
+{
+	_res.nsaddr_list[0].sin_family = AF_INET;
+	_res.nsaddr_list[0].sin_addr = *ns;
+	if (port != 0)
+		_res.nsaddr_list[0].sin_port = htons(port);
+	_res.nscount = 1;
+	if (tTd(8, 61))
+		sm_dprintf("dns_setns(%s,%u)\n", inet_ntoa(*ns), port);
+}
+#endif /* DNSSEC_TEST */
 
 /*
 **  DNS_LOOKUP_INT -- perform dns map lookup (internal helper routine)
@@ -379,6 +502,8 @@ parse_dns_reply(data, len)
 **		rr_type -- resource record type
 **		retrans -- retransmission timeout
 **		retry -- number of retries
+**		options -- DNS resolver options
+**		flags -- various flags
 **
 **	Returns:
 **		result of lookup if succeeded.
@@ -386,12 +511,14 @@ parse_dns_reply(data, len)
 */
 
 DNS_REPLY_T *
-dns_lookup_int(domain, rr_class, rr_type, retrans, retry)
+dns_lookup_int(domain, rr_class, rr_type, retrans, retry, options, flags)
 	const char *domain;
 	int rr_class;
 	int rr_type;
 	time_t retrans;
 	int retry;
+	unsigned int options;
+	unsigned int flags;
 {
 	int len;
 	unsigned long old_options = 0;
@@ -401,18 +528,26 @@ dns_lookup_int(domain, rr_class, rr_type, retrans, retry)
 	querybuf reply_buf;
 	unsigned char *reply;
 
-#define SMRBSIZE sizeof(reply_buf)
+#define SMRBSIZE ((int) sizeof(reply_buf))
 #ifndef IP_MAXPACKET
 # define IP_MAXPACKET	65535
 #endif
 
+	old_options = _res.options;
+	_res.options |= options;
 	if (tTd(8, 16))
 	{
-		old_options = _res.options;
 		_res.options |= RES_DEBUG;
-		sm_dprintf("dns_lookup(%s, %d, %s)\n", domain,
-			   rr_class, dns_type_to_string(rr_type));
+		sm_dprintf("dns_lookup(%s, %d, %s, %x)\n", domain,
+			   rr_class, dns_type_to_string(rr_type), options);
 	}
+#if DNSSEC_TEST
+	if (tTd(8, 15))
+		sm_dprintf("NS=%s, port=%d\n",
+			inet_ntoa(_res.nsaddr_list[0].sin_addr),
+			ntohs(_res.nsaddr_list[0].sin_port));
+#endif
+
 	if (retrans > 0)
 	{
 		save_retrans = _res.retrans;
@@ -433,15 +568,13 @@ dns_lookup_int(domain, rr_class, rr_type, retrans, retry)
 		{
 			if (tTd(8, 4))
 				sm_dprintf("dns_lookup: domain=%s, length=%d, default_size=%d, max=%d, status=response too long\n",
-					   domain, len, (int) SMRBSIZE,
-					   IP_MAXPACKET);
+					   domain, len, SMRBSIZE, IP_MAXPACKET);
 		}
 		else
 		{
 			if (tTd(8, 6))
 				sm_dprintf("dns_lookup: domain=%s, length=%d, default_size=%d, max=%d, status=response longer than default size, resizing\n",
-					   domain, len, (int) SMRBSIZE,
-					   IP_MAXPACKET);
+					   domain, len, SMRBSIZE, IP_MAXPACKET);
 			reply = (unsigned char *)sm_malloc(IP_MAXPACKET);
 			if (reply == NULL)
 				SM_SET_H_ERRNO(TRY_AGAIN);
@@ -450,14 +583,14 @@ dns_lookup_int(domain, rr_class, rr_type, retrans, retry)
 						 reply, IP_MAXPACKET);
 		}
 	}
+	_res.options = old_options;
 	if (tTd(8, 16))
 	{
-		_res.options = old_options;
-		sm_dprintf("dns_lookup(%s, %d, %s) --> %d\n",
-			   domain, rr_class, dns_type_to_string(rr_type), len);
+		sm_dprintf("dns_lookup(%s, %d, %s, %x) --> %d\n",
+			   domain, rr_class, dns_type_to_string(rr_type), options, len);
 	}
 	if (len >= 0 && len < IP_MAXPACKET && reply != NULL)
-		r = parse_dns_reply(reply, len);
+		r = parse_dns_reply(reply, len, flags);
 	if (reply != (unsigned char *)&reply_buf && reply != NULL)
 	{
 		sm_free(reply);
@@ -470,26 +603,34 @@ dns_lookup_int(domain, rr_class, rr_type, retrans, retry)
 	return r;
 }
 
-#  if 0
+/*
+**  DNS_LOOKUP_MAP -- perform dns map lookup
+**
+**	Parameters:
+**		domain -- name to lookup
+**		rr_class -- resource record class
+**		rr_type -- resource record type
+**		retrans -- retransmission timeout
+**		retry -- number of retries
+**		options -- DNS resolver options
+**
+**	Returns:
+**		result of lookup if succeeded.
+**		NULL otherwise.
+*/
+
 DNS_REPLY_T *
-dns_lookup(domain, type_name, retrans, retry)
+dns_lookup_map(domain, rr_class, rr_type, retrans, retry, options)
 	const char *domain;
-	const char *type_name;
+	int rr_class;
+	int rr_type;
 	time_t retrans;
 	int retry;
+	unsigned int options;
 {
-	int type;
-
-	type = dns_string_to_type(type_name);
-	if (type == -1)
-	{
-		if (tTd(8, 16))
-			sm_dprintf("dns_lookup: unknown resource type: `%s'\n",
-				type_name);
-		return NULL;
+	return dns_lookup_int(domain, rr_class, rr_type, retrans, retry,
+			options, RR_AS_TEXT);
 	}
-	return dns_lookup_int(domain, C_IN, type, retrans, retry);
-}
-#  endif /* 0 */
+
 # endif /* NAMED_BIND */
 #endif /* DNSMAP */

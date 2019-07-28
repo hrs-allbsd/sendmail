@@ -136,7 +136,18 @@ sm_dprintf(fmt, va_alist)
 		return;
 #if _FFR_DEBUG_PID_TIME
 	/* note: this is ugly if the output isn't a full line! */
-	if (sm_debug_active(&SmDBGPidTime, 1))
+	if (sm_debug_active(&SmDBGPidTime, 2))
+	{
+		struct timeval tv;
+
+		gettimeofday(&tv, NULL);
+		sm_io_fprintf(SmDebugOutput, SmDebugOutput->f_timeout,
+			"%ld: %ld.%06ld ",
+			(long) getpid(),
+			(long) tv.tv_sec,
+			(long) tv.tv_usec);
+	}
+	else if (sm_debug_active(&SmDBGPidTime, 1))
 	{
 		static char str[32] = "[1900-00-00/00:00:00] ";
 		struct tm *tmp;

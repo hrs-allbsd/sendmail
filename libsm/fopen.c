@@ -89,7 +89,7 @@ reopenalrm(sig)
 **	Parameters:
 **		type -- type of file to open
 **		timeout -- time to complete the open
-**		info -- info describing what is to be opened (type dependant)
+**		info -- info describing what is to be opened (type dependent)
 **		flags -- user selected flags
 **		rpool -- pointer to rpool to be used for this open
 **
@@ -205,7 +205,7 @@ sm_io_dup(fp)
 **	Parameters:
 **		type -- file type to be opened
 **		timeout -- time to complete the reopen
-**		info -- infomation about what is to be "re-opened" (type dep.)
+**		info -- information about what is to be "re-opened" (type dep.)
 **		flags -- user flags to map to internal flags
 **		rpool -- rpool file to be associated with
 **		fp -- the file pointer to reuse

@@ -175,6 +175,12 @@ stab(name, type, op)
 		break;
 #endif /* SOCKETMAP */
 
+# if _FFR_TLSA_DANE
+	  case ST_TLSA_RR:
+		len = sizeof(s->s_tlsa);
+		break;
+# endif
+
 	  default:
 		/*
 		**  Each mailer has its own MCI stab entry:

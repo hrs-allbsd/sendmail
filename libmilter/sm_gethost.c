@@ -20,7 +20,7 @@ SM_RCSID("@(#)$Id: sm_gethost.c,v 8.32 2013-11-22 20:51:36 ca Exp $")
 /*
 **  MI_GETHOSTBY{NAME,ADDR} -- compatibility routines for gethostbyXXX
 **
-**	Some operating systems have wierd problems with the gethostbyXXX
+**	Some operating systems have weird problems with the gethostbyXXX
 **	routines.  For example, Solaris versions at least through 2.3
 **	don't properly deliver a canonical h_name field.  This tries to
 **	work around these problems.
@@ -158,7 +158,7 @@ mi_gethostbyname(name, family)
 **
 **	Returns:
 **		1 if the address was valid
-**		0 if the address wasn't parseable
+**		0 if the address wasn't parsable
 **		-1 if error
 */
 

@@ -204,11 +204,12 @@ space to headers when they are added, inserted, or changed.
 <LI>The MTA can be instructed not to send information about
 various SMTP stages, these flags start with:
 <A NAME="SMFIP_NO"><CODE>SMFIP_NO*</CODE></A>.
+Setting any of these flags affects all connections.
 <UL>
 <LI><A NAME="SMFIP_NOCONNECT"><CODE>SMFIP_NOCONNECT</CODE></A>:
 <A HREF="xxfi_connect.html">xxfi_connect()</A>
 <LI><A NAME="SMFIP_NOHELO"><CODE>SMFIP_NOHELO</CODE></A>:
-<A HREF="xxfi_header.html">xxfi_header()</A>
+<A HREF="xxfi_helo.html">xxfi_helo()</A>
 <LI><A NAME="SMFIP_NOMAIL"><CODE>SMFIP_NOMAIL</CODE></A>:
 <A HREF="xxfi_envfrom.html">xxfi_envfrom()</A>
 <LI><A NAME="SMFIP_NORCPT"><CODE>SMFIP_NORCPT</CODE></A>:

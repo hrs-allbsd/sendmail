@@ -1804,8 +1804,8 @@ pruneroute(addr)
 
 	while (start != NULL)
 	{
-		if (getmxrr(hostbuf, mxhosts, NULL, false,
-			    &rcode, true, NULL) > 0)
+		if (getmxrr(hostbuf, mxhosts, NULL, TRYFALLBACK, &rcode, NULL)
+		    > 0)
 		{
 			(void) sm_strlcpy(addr + 1, start + 1,
 					  strlen(addr) - 1);

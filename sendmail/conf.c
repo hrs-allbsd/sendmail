@@ -23,6 +23,7 @@ SM_RCSID("@(#)$Id: conf.c,v 8.1192 2014-01-27 18:23:21 ca Exp $")
 
 #include <daemon.h>
 #include "map.h"
+#include <ratectrl.h>
 
 #ifdef DEC
 # if NETINET6
@@ -42,6 +43,9 @@ SM_RCSID("@(#)$Id: conf.c,v 8.1192 2014-01-27 18:23:21 ca Exp $")
 #if HASULIMIT && defined(HPUX11)
 # include <ulimit.h>
 #endif /* HASULIMIT && defined(HPUX11) */
+#if STARTTLS
+# include "tls.h"
+#endif
 
 static void	setupmaps __P((void));
 static void	setupmailers __P((void));
@@ -365,6 +369,9 @@ setdefaults(e)
 	TLS_Srv_Opts = TLS_I_SRV;
 	if (NULL == EVP_digest)
 		EVP_digest = EVP_md5();
+# if _FFR_TLSFB2CLEAR
+	TLSFallbacktoClear = true;
+# endif
 #endif /* STARTTLS */
 #ifdef HESIOD_INIT
 	HesiodContext = NULL;
@@ -527,6 +534,12 @@ setupmaps()
 		ndbm_map_lookup, ndbm_map_store);
 #endif /* NDBM */
 
+#if CDB
+	MAPDEF("cdb", CDBEXT, MCF_ALIASOK|MCF_REBUILDABLE,
+		map_parseargs, cdb_map_open, cdb_map_close,
+		cdb_map_lookup, null_map_store);
+#endif /* CDB */
+
 #if NIS
 	MAPDEF("nis", NULL, MCF_ALIASOK,
 		map_parseargs, nis_map_open, null_map_close,
@@ -559,7 +572,7 @@ setupmaps()
 #endif /* MAP_NSD */
 
 #if HESIOD
-	MAPDEF("hesiod", NULL, MCF_ALIASOK|MCF_ALIASONLY,
+	MAPDEF("hesiod", NULL, MCF_ALIASOK,
 		map_parseargs, hes_map_open, hes_map_close,
 		hes_map_lookup, null_map_store);
 #endif /* HESIOD */
@@ -605,11 +618,11 @@ setupmaps()
 		map_parseargs, text_map_open, null_map_close,
 		text_map_lookup, null_map_store);
 
-	MAPDEF("stab", NULL, MCF_ALIASOK|MCF_ALIASONLY,
+	MAPDEF("stab", NULL, MCF_ALIASOK,
 		map_parseargs, stab_map_open, null_map_close,
 		stab_map_lookup, stab_map_store);
 
-	MAPDEF("implicit", NULL, MCF_ALIASOK|MCF_ALIASONLY|MCF_REBUILDABLE,
+	MAPDEF("implicit", NULL, MCF_ALIASOK|MCF_REBUILDABLE,
 		map_parseargs, impl_map_open, impl_map_close,
 		impl_map_lookup, impl_map_store);
 
@@ -690,6 +703,20 @@ setupmaps()
 		dprintf_map_lookup, null_map_store);
 #endif /* _FFR_DPRINTF_MAP */
 
+#if _FFR_SETDEBUG_MAP
+	/* setdebug map -- set debug levels */
+	MAPDEF("setdebug", NULL, 0,
+		dequote_init, null_map_open, null_map_close,
+		setdebug_map_lookup, null_map_store);
+#endif
+
+#if _FFR_SETOPT_MAP
+	/* setopt map -- set option */
+	MAPDEF("setopt", NULL, 0,
+		dequote_init, null_map_open, null_map_close,
+		setopt_map_lookup, null_map_store);
+#endif
+
 	if (tTd(38, 2))
 	{
 		/* bogus map -- always return tempfail */
@@ -758,6 +785,14 @@ inithostmaps()
 					  sizeof(buf));
 			(void) makemapentry(buf);
 		}
+#if CDB
+		else if (strcmp(maptype[i], "cdb") == 0 &&
+			 stab("aliases.cdb", ST_MAP, ST_FIND) == NULL)
+		{
+			(void) sm_strlcpy(buf, "aliases.cdb null", sizeof(buf));
+			(void) makemapentry(buf);
+		}
+#endif /* CDB */
 #if NISPLUS
 		else if (strcmp(maptype[i], "nisplus") == 0 &&
 			 stab("aliases.nisplus", ST_MAP, ST_FIND) == NULL)
@@ -1064,15 +1099,23 @@ switch_map_find(service, maptype, mapreturn)
 	svcno = 0;
 	if (strcmp(service, "aliases") == 0)
 	{
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "files";
+# if CDB
+		SM_ASSERT(svcno < MAXMAPSTACK);
+		maptype[svcno++] = "cdb";
+# endif
 # if defined(AUTO_NETINFO_ALIASES) && defined (NETINFO)
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "netinfo";
 # endif /* defined(AUTO_NETINFO_ALIASES) && defined (NETINFO) */
 # ifdef AUTO_NIS_ALIASES
 #  if NISPLUS
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "nisplus";
 #  endif /* NISPLUS */
 #  if NIS
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "nis";
 #  endif /* NIS */
 # endif /* AUTO_NIS_ALIASES */
@@ -1082,16 +1125,20 @@ switch_map_find(service, maptype, mapreturn)
 	if (strcmp(service, "hosts") == 0)
 	{
 # if NAMED_BIND
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "dns";
 # else /* NAMED_BIND */
 #  if defined(sun) && !defined(BSD)
 		/* SunOS */
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "nis";
 #  endif /* defined(sun) && !defined(BSD) */
 # endif /* NAMED_BIND */
 # if defined(AUTO_NETINFO_HOSTS) && defined (NETINFO)
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "netinfo";
 # endif /* defined(AUTO_NETINFO_HOSTS) && defined (NETINFO) */
+		SM_ASSERT(svcno < MAXMAPSTACK);
 		maptype[svcno++] = "files";
 		errno = save_errno;
 		return svcno;
@@ -2592,7 +2639,7 @@ setproctitle(fmt, va_alist)
 #  endif /* SPT_TYPE == SPT_REUSEARGV */
 #  if SPT_TYPE == SPT_CHANGEARGV
 	Argv[0] = buf;
-	Argv[1] = 0;
+	Argv[1] = NULL;
 #  endif /* SPT_TYPE == SPT_CHANGEARGV */
 # endif /* SPT_TYPE != SPT_NONE */
 }
@@ -4156,7 +4203,7 @@ strtol(nptr, endptr, base)
 		errno = ERANGE;
 	} else if (neg)
 		acc = -acc;
-	if (endptr != 0)
+	if (endptr != NULL)
 		*endptr = (char *)(any ? s - 1 : nptr);
 	return acc;
 }
@@ -5200,17 +5247,26 @@ bool
 isloopback(sa)
 	SOCKADDR sa;
 {
-#if NETINET6
-	if (IN6_IS_ADDR_LOOPBACK(&sa.sin6.sin6_addr))
-		return true;
-#else /* NETINET6 */
 	/* XXX how to correctly extract IN_LOOPBACKNET part? */
-	if (((ntohl(sa.sin.sin_addr.s_addr) & IN_CLASSA_NET)
+#define SM_IS_IPV4_LOOP(a) (((ntohl(a) & IN_CLASSA_NET) \
 	     >> IN_CLASSA_NSHIFT) == IN_LOOPBACKNET)
+#if NETINET6
+	if (sa.sa.sa_family == AF_INET6 &&
+	    IN6_IS_ADDR_V4MAPPED(&sa.sin6.sin6_addr) &&
+	    SM_IS_IPV4_LOOP(((uint32_t *) (&sa.sin6.sin6_addr))[3]))
 		return true;
-#endif /* NETINET6 */
+	if (sa.sa.sa_family == AF_INET6 &&
+	    IN6_IS_ADDR_LOOPBACK(&sa.sin6.sin6_addr))
+		return true;
+#endif
+#if NETINET
+	if (sa.sa.sa_family == AF_INET &&
+	    SM_IS_IPV4_LOOP(sa.sin.sin_addr.s_addr))
+		return true;
+#endif
 	return false;
 }
+
 /*
 **  GET_NUM_PROCS_ONLINE -- return the number of processors currently online
 **
@@ -5736,6 +5792,9 @@ link(source, target)
 **  Compile-Time options
 */
 
+#define SM_STR(x) #x
+#define SM_XSTR(x) SM_STR(x)
+
 char	*CompileOptions[] =
 {
 #if ALLOW_255
@@ -5780,6 +5839,12 @@ char	*CompileOptions[] =
 #if MATCHGECOS
 	"MATCHGECOS",
 #endif
+#if MAXDAEMONS != 10
+	"MAXDAEMONS=" SM_XSTR(MAXDAEMONS) " "
+#endif
+#if defined(MSGIDLOGLEN)
+	"MSGIDLOGLEN=" SM_XSTR(MSGIDLOGLEN),
+#endif
 #if MILTER
 	"MILTER",
 #endif
@@ -5821,6 +5886,9 @@ char	*CompileOptions[] =
 #endif
 #if NEWDB
 	"NEWDB",
+#endif
+#if CDB
+	"CDB=" SM_XSTR(CDB),
 #endif
 #if NIS
 	"NIS",
@@ -5865,11 +5933,18 @@ char	*CompileOptions[] =
 #if SUID_ROOT_FILES_OK
 	"SUID_ROOT_FILES_OK",
 #endif
+#if SYSLOG_BUFSIZE > 1024
+	"SYSLOG_BUFSIZE=" SM_XSTR(SYSLOG_BUFSIZE),
+#endif
 #if TCPWRAPPERS
 	"TCPWRAPPERS",
 #endif
 #if TLS_NO_RSA
 	"TLS_NO_RSA",
+#endif
+#if TLS_EC
+	/* elliptic curves */
+	"TLS_EC",
 #endif
 #if TLS_VRFY_PER_CTX
 	"TLS_VRFY_PER_CTX",
@@ -5919,6 +5994,9 @@ char	*OsCompileOptions[] =
 #endif
 #if DEC_OSF_BROKEN_GETPWENT
 	"DEC_OSF_BROKEN_GETPWENT",
+#endif
+#if DNSSEC_TEST
+	"DNSSEC_TEST",
 #endif
 #if FAST_PID_RECYCLE
 	"FAST_PID_RECYCLE",
@@ -6124,7 +6202,16 @@ char	*OsCompileOptions[] =
 	"USESYSCTL",
 #endif
 #if USE_OPENSSL_ENGINE
+	/*
+	**  0: OpenSSL ENGINE?
+	**  1: Support Sun OpenSSL patch for SPARC T4 pkcs11
+	**  2: none
+	*/
+# if USE_OPENSSL_ENGINE != 1
+	"USE_OPENSSL_ENGINE=" SM_XSTR(USE_OPENSSL_ENGINE),
+# else
 	"USE_OPENSSL_ENGINE",
+#endif
 #endif
 #if USING_NETSCAPE_LDAP
 	"USING_NETSCAPE_LDAP",
@@ -6142,6 +6229,7 @@ char	*OsCompileOptions[] =
 char	*FFRCompileOptions[] =
 {
 #if _FFR_ADD_BCC
+	/* see cf/features/bcc.m4 */
 	"_FFR_ADD_BCC",
 #endif
 #if _FFR_ADDR_TYPE_MODES
@@ -6157,6 +6245,18 @@ char	*FFRCompileOptions[] =
 	/* DefaultAuthInfo doesn't really work in 8.13 anymore. */
 	"_FFR_ALLOW_SASLINFO",
 #endif
+#if _FFR_AUTH_FAIL_LOG_USER
+	/*
+	**  Log user=  for failed AUTH attempts.
+	**  Based on patch from:
+	**    Packet Hack, Jim Hranicky, Kevin A. McGrail & Joe Quinn.
+	*/
+# if SASL
+	"_FFR_AUTH_FAIL_LOG_USER",
+# else
+#  error "_FFR_AUTH_FAIL_LOG_USER set but SASL not defined"
+# endif
+#endif
 #if _FFR_BADRCPT_SHUTDOWN
 	/* shut down connection (421) if there are too many bad RCPTs */
 	"_FFR_BADRCPT_SHUTDOWN",
@@ -6164,6 +6264,10 @@ char	*FFRCompileOptions[] =
 #if _FFR_BESTMX_BETTER_TRUNCATION
 	/* Better truncation of list of MX records for dns map. */
 	"_FFR_BESTMX_BETTER_TRUNCATION",
+#endif
+#if _FFR_BLANKENV_MACV
+	/* also look up macros in BlankEnvelope */
+	"_FFR_BLANKENV_MACV",
 #endif
 #if _FFR_BOUNCE_QUEUE
 	/* Separate, unprocessed queue for DSNs */
@@ -6178,13 +6282,27 @@ char	*FFRCompileOptions[] =
 	/* Stricter checks about queue directory permissions. */
 	"_FFR_CHK_QUEUE",
 #endif
+#if _FFR_CLIENTCA
+	/*
+	**  Allow to set client specific CA values.
+	**  CACertFile: see doc/op.*:
+	**  "The DNs of these certificates are sent to the client
+	**  during the TLS handshake (as part of the CertificateRequest)
+	**  as the list of acceptable CAs.
+	**  However, do not list too many root CAs in that file,
+	**  otherwise the TLS handshake may fail;"
+	**  In TLSv1.3 the certs in CACertFile are also sent by
+	**  the client to the server and there is seemingly a
+	**  16KB limit (just in OpenSSL?).
+	**  Having a separate CACertFile for the client
+	**  helps to avoid this problem.
+	*/
+
+	"_FFR_CLIENTCA",
+#endif
 #if _FFR_CLIENT_SIZE
 	/* Don't try to send mail if its size exceeds SIZE= of server. */
 	"_FFR_CLIENT_SIZE",
-#endif
-#if _FFR_CRLPATH
-	/* CRLPath; needs documentation; Al Smith */
-	"_FFR_CRLPATH",
 #endif
 #if _FFR_DM_ONE
 	/* deliver first TA in background, then queue */
@@ -6239,6 +6357,10 @@ char	*FFRCompileOptions[] =
 #if _FFR_EIGHT_BIT_ADDR_OK
 	/* EightBitAddrOK: allow 8-bit e-mail addresses */
 	"_FFR_EIGHT_BIT_ADDR_OK",
+#endif
+#if _FFR_EXPAND_HELONAME
+	/* perform macro expansion for heloname */
+	"_FFR_EXPAND_HELONAME",
 #endif
 #if _FFR_EXTRA_MAP_CHECK
 	/* perform extra checks on $( $) in R lines */
@@ -6306,6 +6428,10 @@ char	*FFRCompileOptions[] =
 	/* Ignore extensions offered in response to HELO */
 	"_FFR_IGNORE_EXT_ON_HELO",
 #endif
+#if _FFR_KEEPBCC
+	/* Keep Bcc header */
+	"_FFR_KEEPBCC",
+#endif
 #if _FFR_LINUX_MHNL
 	/* Set MAXHOSTNAMELEN to 256 (Linux) */
 	"_FFR_LINUX_MHNL",
@@ -6323,9 +6449,11 @@ char	*FFRCompileOptions[] =
 	"_FFR_LOG_MORE2",
 #endif
 #if _FFR_LOGREPLY
+	/* log the actual SMTP server reply as reply= */
 	"_FFR_LOGREPLY",
 #endif
 #if _FFR_MAIL_MACRO
+	/* make the "real" sender address available in {mail_from} */
 	"_FFR_MAIL_MACRO",
 #endif
 #if _FFR_MAXDATASIZE
@@ -6349,7 +6477,7 @@ char	*FFRCompileOptions[] =
 	"_FFR_MAX_SLEEP_TIME",
 #endif
 #if _FFR_MDS_NEGOTIATE
-	/* MaxDataSize negotation with libmilter */
+	/* MaxDataSize negotiation with libmilter */
 	"_FFR_MDS_NEGOTIATE",
 #endif
 #if _FFR_MEMSTAT
@@ -6416,18 +6544,50 @@ char	*FFRCompileOptions[] =
 	"_FFR_NO_PIPE",
 #endif
 #if _FFR_LDAP_NETWORK_TIMEOUT
+# if LDAPMAP
 	/* set LDAP_OPT_NETWORK_TIMEOUT if available (-c) */
 	"_FFR_LDAP_NETWORK_TIMEOUT",
+# else
+#  ERROR: _FFR_LDAP_NETWORK_TIMEOUT requires _LDAPMAP
+# endif
+#endif
+#if _FFR_LDAP_SINGLEDN
+	/*
+	**  The LDAP database map code in Sendmail 8.12.10, when
+	**  given the -1 switch, would match only a single DN,
+	**  but was able to return multiple attributes for that
+	**  DN.  In Sendmail 8.13 this "bug" was corrected to
+	**  only return if exactly one attribute matched.
+	**
+	**  Unfortunately, our configuration uses the former
+	**  behaviour.  Attached is a relatively simple patch
+	**  to 8.13.4 which adds a -2 switch (for lack of a
+	**  better option) which returns the single dn/multiple
+	**  attributes.
+	**
+	** Jeffrey T. Eaton, Carnegie-Mellon University
+	*/
+
+	"_FFR_LDAP_SINGLEDN",
 #endif
 #if _FFR_LOG_NTRIES
 	/* log ntries=, from Nik Clayton of FreeBSD */
 	"_FFR_LOG_NTRIES",
+#endif
+#if _FFR_OCC
+# if SM_CONF_SHM
+	/* outgoing connection control (not yet working) */
+	"_FFR_OCC",
+# else
+#  ERROR: FFR_OCC requires _SM_CONF_SHM
+# endif
 #endif
 #if _FFR_PROXY
 	/* "proxy" (synchronous) delivery mode */
 	"_FFR_PROXY",
 #endif
 #if _FFR_QF_PARANOIA
+	/* Check to make sure key fields were read from qf */
 	"_FFR_QF_PARANOIA",
 #endif
 #if _FFR_QUEUE_GROUP_SORTORDER
@@ -6448,6 +6608,7 @@ char	*FFRCompileOptions[] =
 	"_FFR_QUEUE_SCHED_DBG",
 #endif
 #if _FFR_RCPTFLAGS
+	/* dynamic mailer modifications via {rcpt_flags}*/
 	"_FFR_RCPTFLAGS",
 #endif
 #if _FFR_RCPTTHROTDELAY
@@ -6487,28 +6648,18 @@ char	*FFRCompileOptions[] =
 	/* session id (for logging) */
 	"_FFR_SESSID",
 #endif
+#if _FFR_SETANYOPT
+	"_FFR_SETANYOPT",
+#endif
+#if _FFR_SETDEBUG_MAP
+	"_FFR_SETDEBUG_MAP",
+#endif
+#if _FFR_SETOPT_MAP
+	"_FFR_SETOPT_MAP",
+#endif
 #if _FFR_SHM_STATUS
 	/* Donated code (unused). */
 	"_FFR_SHM_STATUS",
-#endif
-#if _FFR_LDAP_SINGLEDN
-	/*
-	**  The LDAP database map code in Sendmail 8.12.10, when
-	**  given the -1 switch, would match only a single DN,
-	**  but was able to return multiple attributes for that
-	**  DN.  In Sendmail 8.13 this "bug" was corrected to
-	**  only return if exactly one attribute matched.
-	**
-	**  Unfortunately, our configuration uses the former
-	**  behaviour.  Attached is a relatively simple patch
-	**  to 8.13.4 which adds a -2 switch (for lack of a
-	**  better option) which returns the single dn/multiple
-	**  attributes.
-	**
-	** Jeffrey T. Eaton, Carnegie-Mellon University
-	*/
-
-	"_FFR_LDAP_SINGLEDN",
 #endif
 #if _FFR_SKIP_DOMAINS
 	/* process every N'th domain instead of every N'th message */
@@ -6517,6 +6668,14 @@ char	*FFRCompileOptions[] =
 #if _FFR_SLEEP_USE_SELECT
 	/* Use select(2) in libsm/clock.c to emulate sleep(2) */
 	"_FFR_SLEEP_USE_SELECT ",
+#endif
+#if _FFR_SM_LDAP_DBG
+# if LDAPMAP && defined(LBER_OPT_LOG_PRINT_FN)
+	/* LDAP debugging */
+	"_FFR_SM_LDAP_DBG",
+# else
+#  ERROR: FFR_SM_LDAP_DBG requires _LDAPMAP and LBER_OPT_LOG_PRINT_FN
+# endif
 #endif
 #if _FFR_SPT_ALIGN
 	/*
@@ -6542,8 +6701,53 @@ char	*FFRCompileOptions[] =
 	/* Donated code (unused). */
 	"_FFR_TIMERS",
 #endif
-#if _FFR_TLS_EC
-	"_FFR_TLS_EC",
+#if _FFR_TLS_ALTNAMES
+	/* store subjectAltNames in class {cert_altnames} */
+# if STARTTLS
+	"_FFR_TLS_ALTNAMES",
+# else
+#  error "_FFR_TLS_ALTNAMES set but STARTTLS not defined"
+# endif
+#endif
+#if _FFR_TLSA_DANE
+	/*
+	**  Experimental, partial DANE support (see RFC 7672 et.al.).
+	**  Only TLSA RR 3-1-1 (DANE-EE) is currently implemented
+	**  and the port is hardcoded to 25.
+	**  This feature can be enabled at compile time by adding
+	**  the option -D_FFR_TLSA_DANE
+	**  and at run time using
+	**  O DANE=true
+	**  (note the above also automatically adds use_dnssec and
+	**  use_edns0 to ResolverOptions)
+	**  If the client finds a usable TLSA RR and the check
+	**  succeeds the macro {verify} is set to "TRUSTED" which is
+	**  also an accepted value for the TLS restriction
+	**	VERIFY		verification must have succeeded
+	**  (see cf/README: Allowing Connections)
+	**  TLSA lookups can be disabled per server using the
+	**  flag 'd', e.g.,
+	**  tls_clt_feature:1.2.3.3	"flags=d;"
+	**  Feedback about using this feature is appreciated (as well
+	**  as comments about the code and configuration options).
+	**  Be aware that the implementation does not yet handle various
+	**  error conditions as required by the RFCs, esp. temporary
+	**  DNS lookups failures, hence relying on DANE to enforce
+	**  secure connections is not yet possible.
+	*/
+# if STARTTLS
+	"_FFR_TLSA_DANE",
+# else
+#  error "_FFR_TLSA_DANE set but STARTTLS not defined"
+# endif
+#endif
+#if _FFR_TLSFB2CLEAR
+	/* set default for TLSFallbacktoClear to true */
+# if STARTTLS
+	"_FFR_TLSFB2CLEAR",
+# else
+#  error "_FFR_TLSFB2CLEAR set but STARTTLS not defined"
+# endif
 #endif
 #if _FFR_TLS_USE_CERTIFICATE_CHAIN_FILE
 	/*
@@ -6551,11 +6755,11 @@ char	*FFRCompileOptions[] =
 	**  instead of SSL_CTX_use_certificate_file()
 	*/
 
+# if STARTTLS
 	"_FFR_TLS_USE_CERTIFICATE_CHAIN_FILE",
-#endif
-#if _FFR_TLS_SE_OPTS
-	/* TLS session options */
-	"_FFR_TLS_SE_OPTS",
+# else
+#  error "_FFR_TLS_USE_CERTIFICATE_CHAIN_FILE set but STARTTLS not defined"
+# endif
 #endif
 #if _FFR_TRUSTED_QF
 	/*
@@ -6576,7 +6780,16 @@ char	*FFRCompileOptions[] =
 
 	"_FFR_USE_GETPWNAM_ERRNO",
 #endif
+#if _FFR_VRFY_TRUSTED_FIRST
+# if defined(X509_V_FLAG_TRUSTED_FIRST)
+	"_FFR_VRFY_TRUSTED_FIRST",
+# else
+#  error "FFR_VRFY_TRUSTED_FIRST set but X509_V_FLAG_TRUSTED_FIRST not defined"
+# endif
+#endif
+
 #if _FFR_USE_SEM_LOCKING
+	/* Use semaphore locking */
 	"_FFR_USE_SEM_LOCKING",
 #endif
 #if _FFR_USE_SETLOGIN
@@ -6585,6 +6798,7 @@ char	*FFRCompileOptions[] =
 	"_FFR_USE_SETLOGIN",
 #endif
 #if _FFR_XCNCT
+	/* X-Connect support */
 	"_FFR_XCNCT",
 #endif
 	NULL

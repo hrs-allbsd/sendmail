@@ -464,7 +464,7 @@ LIBMILTER_API int smfi_chgheader __P((SMFICTX *, char *, int, char *));
 **
 **	SMFICTX *ctx; Opaque context structure
 **	char *headerf; Header field name
-**	int index; The Nth occurence of header field name
+**	int index; The Nth occurrence of header field name
 **	char *headerv; New header field value (empty for delete header)
 */
 

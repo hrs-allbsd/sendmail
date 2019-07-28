@@ -118,7 +118,7 @@ sm_stdopen(fp, info, flags, rpool)
 **		Success: number of bytes read
 **
 **	Side Effects:
-**		Updates internal offset into file.
+**		Updates internal offset for file.
 */
 
 ssize_t

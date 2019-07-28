@@ -185,6 +185,7 @@ static FILESYS	FileSys[MAXFILESYS];	/* queue file systems */
 static const char *FSPath[MAXFILESYS];	/* pathnames for file systems */
 
 #if SM_CONF_SHM
+# include <ratectrl.h>
 
 /*
 **  Shared memory data
@@ -198,7 +199,9 @@ static const char *FSPath[MAXFILESYS];	/* pathnames for file systems */
 **	NumFileSys -- number of file systems.
 **	FileSys -- (array of) structure for used file systems.
 **	RSATmpCnt -- counter for number of uses of ephemeral RSA key.
+**	[OCC -- ...]
 **	QShm -- (array of) structure for information about queue directories.
+**		this must be last as the size is depending on the config.
 */
 
 /*
@@ -236,13 +239,21 @@ static size_t shms;
 # define OFF_RSA_TMP_CNT(p) (((char *) (p)) + SHM_OFF_HEAD + sizeof(FileSys) + sizeof(int))
 int	*PRSATmpCnt;
 
+# if _FFR_OCC
+#  define OFF_OCC_SHM(p) (((char *) (p)) + SHM_OFF_HEAD + sizeof(FileSys) + sizeof(int) * 2)
+#  define OCC_SIZE (sizeof(CHash_T) * CPMHSIZE)
+static CHash_T *occ = NULL;
+# else
+#  define OCC_SIZE 0
+# endif
+
 /* offset for queue_shm */
-# define OFF_QUEUE_SHM(p) (((char *) (p)) + SHM_OFF_HEAD + sizeof(FileSys) + sizeof(int) * 2)
+# define OFF_QUEUE_SHM(p) (((char *) (p)) + SHM_OFF_HEAD + sizeof(FileSys) + sizeof(int) * 2 + OCC_SIZE)
 
 # define QSHM_ENTRIES(i)	QShm[i].qs_entries
 
 /* basic size of shared memory segment */
-# define SM_T_SIZE	(SHM_OFF_HEAD + sizeof(FileSys) + sizeof(int) * 2)
+# define SM_T_SIZE	(SHM_OFF_HEAD + sizeof(FileSys) + sizeof(int) * 2 + OCC_SIZE)
 
 static unsigned int	hash_q __P((char *, unsigned int));
 
@@ -275,7 +286,6 @@ hash_q(p, h)
 	return h;
 }
 
-
 #else /* SM_CONF_SHM */
 # define FILE_SYS(i)	FileSys[i]
 #endif /* SM_CONF_SHM */
@@ -293,11 +303,10 @@ hash_q(p, h)
 **	A	AUTH= parameter
 **	B	body type
 **	C	controlling user
-**	D	data file name
+**	D	data file name (obsolete)
 **	d	data file directory name (added in 8.12)
 **	E	error recipient
 **	F	flag bits
-**	G	free
 **	H	header
 **	I	data file's inode number
 **	K	time of last delivery attempt
@@ -313,7 +322,6 @@ hash_q(p, h)
 **	T	init time
 **	V	queue file version
 **	X	free (was: character set if _FFR_SAVE_CHARSET)
-**	Y	free
 **	Z	original envelope id from ESMTP
 **	!	deliver by (added in 8.12)
 **	$	define macro
@@ -697,6 +705,7 @@ queueup(e, announce, msync)
 	printctladdr(NULL, NULL);
 	for (q = e->e_sendqueue; q != NULL; q = q->q_next)
 	{
+		q->q_flags &= ~QQUEUED;
 		if (!QS_IS_UNDELIVERED(q->q_state))
 			continue;
 
@@ -752,6 +761,14 @@ queueup(e, announce, msync)
 					    tag, NULL, (time_t) 0, e, q, EX_OK);
 			e->e_to = NULL;
 		}
+
+		/*
+		**  This is only "valid" when the msg is safely in the queue,
+		**  i.e., EF_INQUEUE needs to be set.
+		*/
+
+		q->q_flags |= QQUEUED;
+
 		if (tTd(40, 1))
 		{
 			sm_dprintf("queueing ");
@@ -1340,9 +1357,10 @@ schedule_queue_runs(runall, wgrp, didit)
 		if (tTd(69, 10))
 			sm_syslog(LOG_INFO, NOQID,
 				"sqr: wgrp=%d, cgrp=%d, qgrp=%d, intvl=%ld, QI=%ld, runall=%d, lastrun=%ld, nextrun=%ld, sched=%d",
-				wgrp, cgrp, qgrp, Queue[qgrp]->qg_queueintvl,
-				QueueIntvl, runall, lastsched,
-				Queue[qgrp]->qg_nextrun, sched);
+				wgrp, cgrp, qgrp,
+				(long) Queue[qgrp]->qg_queueintvl,
+				(long) QueueIntvl, runall, (long) lastsched,
+				(long) Queue[qgrp]->qg_nextrun, sched);
 #endif /* _FFR_QUEUE_SCHED_DBG */
 		INCR_MOD(cgrp, WorkGrp[wgrp].wg_numqgrp);
 	} while (endgrp != cgrp);
@@ -1394,7 +1412,7 @@ checkqueuerunner()
 					"checkqueuerunner: queue %d should have been run at %s, queue interval %ld",
 					qgrp,
 					arpadate(ctime(&Queue[qgrp]->qg_nextrun)),
-					qintvl);
+					(long) qintvl);
 		}
 	}
 	if (minqintvl > 0)
@@ -1841,6 +1859,16 @@ runner_work(e, sequenceno, didfork, skip, njobs)
 		if (sm_debug_active(&DebugLeakQ, 1))
 			sm_heap_setgroup(oldgroup);
 #endif /* SM_HEAP_CHECK */
+#if _FFR_TESTS
+		if (tTd(76, 101))
+		{
+			int sl;
+
+			sl = tTdlevel(76) - 100;
+			sm_dprintf("run_work_group: sleep=%d\n", sl);
+			sleep(sl);
+		}
+#endif
 	}
 
 	BlockOldsh = false;
@@ -2514,7 +2542,7 @@ gatherq(qgrp, qdir, doall, full, more, pnentries)
 
 	if (tTd(41, 1))
 	{
-		sm_dprintf("gatherq:\n");
+		sm_dprintf("gatherq: %s\n", qd);
 
 		check = QueueLimitId;
 		while (check != NULL)
@@ -4493,14 +4521,11 @@ readqf(e, openonly)
 
 		  case '$':		/* define macro */
 			{
-				char *p;
-
-				/* XXX elimate p? */
 				r = macid_parse(&bp[1], &ep);
 				if (r == 0)
 					break;
-				p = sm_rpool_strdup_x(e->e_rpool, ep);
-				macdefine(&e->e_macro, A_PERM, r, p);
+				macdefine(&e->e_macro, A_PERM, r,
+					sm_rpool_strdup_x(e->e_rpool, ep));
 			}
 			break;
 
@@ -4626,11 +4651,13 @@ readqf(e, openonly)
 static void prtstr __P((char *, int));
 
 #if _FFR_BOUNCE_QUEUE
-# define SKIP_BOUNCE_QUEUE	\
-		if (i == BounceQueue)	\
+# define IS_BOUNCE_QUEUE(i) ((i) == BounceQueue)
+# define SKIP_BOUNCE_QUEUE(i)	\
+		if (IS_BOUNCE_QUEUE(i))	\
 			continue;
 #else
-# define SKIP_BOUNCE_QUEUE
+# define IS_BOUNCE_QUEUE(i) false
+# define SKIP_BOUNCE_QUEUE(i)
 #endif
 
 static void
@@ -4696,7 +4723,7 @@ printnqe(out, prefix)
 	{
 		int j;
 
-		SKIP_BOUNCE_QUEUE
+		SKIP_BOUNCE_QUEUE(i)
 		k++;
 		for (j = 0; j < Queue[i]->qg_numqueues; j++)
 		{
@@ -6625,12 +6652,25 @@ disk_status(out, prefix)
 **		none.
 */
 
-#if _FFR_USE_SEM_LOCKING
-#if SM_CONF_SEM
+#if _FFR_USE_SEM_LOCKING && SM_CONF_SEM
 static int SemId = -1;		/* Semaphore Id */
 int SemKey = SM_SEM_KEY;
-#endif /* SM_CONF_SEM */
-#endif /* _FFR_USE_SEM_LOCKING */
+#  define SEM_LOCK(r)	\
+	do	\
+	{	\
+		if (SemId >= 0)	\
+			r = sm_sem_acq(SemId, 0, 1);	\
+	} while (0)
+# define SEM_UNLOCK(r)	\
+	do	\
+	{	\
+		if (SemId >= 0 && r >= 0)	\
+			r = sm_sem_rel(SemId, 0, 1);	\
+	} while (0)
+#else /* _FFR_USE_SEM_LOCKING && SM_CONF_SEM */
+# define SEM_LOCK(r)
+# define SEM_UNLOCK(r)
+#endif /* _FFR_USE_SEM_LOCKING && SM_CONF_SEM */
 
 static void init_sem __P((bool));
 
@@ -6688,6 +6728,113 @@ stop_sem(owner)
 	return;
 }
 
+# if _FFR_OCC
+/*
+**  Todo: call occ_close()
+**  when closing a connection to decrease #open connections (and rate!)
+**  (currently done as hack in deliver())
+**  must also be done if connection couldn't be opened (see daemon.c: OCC_CLOSE)
+*/
+
+/*
+**  OCC_EXCEEDED -- is an outgoing connection limit exceeded?
+**
+**	Parameters:
+**		e -- envelope
+**		mci -- mail connection information
+**		host -- name of host
+**		addr -- address of host
+**
+**	Returns:
+**		true iff an outgoing connection limit is exceeded
+*/
+
+bool
+occ_exceeded(e, mci, host, addr)
+	ENVELOPE *e;
+	MCI *mci;
+	const char *host;
+	SOCKADDR *addr;
+{
+	time_t now;
+	bool exc;
+	int r, ratelimit, conclimit;
+	char *limit; /* allocated from e_rpool by rscheck(), no need to free() */
+
+/* if necessary, some error checking for a number could be done here */
+#define STR2INT(r, limit, val)	\
+	do \
+	{	\
+		if ((r) == EX_OK && (limit) != NULL)	\
+			(val) = atoi((limit));	\
+	} while (0);
+
+	if (occ == NULL || e == NULL)
+		return false;
+	ratelimit = conclimit = 0;
+	limit = NULL;
+	r = rscheck("oc_rate", host, anynet_ntoa(addr), e, RSF_ADDR,
+		12, NULL, NOQID, NULL, &limit);
+	STR2INT(r, limit, ratelimit);
+	limit = NULL;
+	r = rscheck("oc_conc", host, anynet_ntoa(addr), e, RSF_ADDR,
+		12, NULL, NOQID, NULL, &limit);
+	STR2INT(r, limit, conclimit);
+	now = curtime();
+
+	/* lock occ: lock entire shared memory segment */
+	SEM_LOCK(r);
+	exc = (bool) conn_limits(e, now, addr, SM_CLFL_EXC, occ, ratelimit,
+				conclimit);
+	SEM_UNLOCK(r);
+	if (!exc && mci != NULL)
+		mci->mci_flags |= MCIF_OCC_INCR;
+	return exc;
+}
+
+/*
+**  OCC_CLOSE -- "close" an outgoing connection: up connection status
+**
+**	Parameters:
+**		e -- envelope
+**		mci -- mail connection information
+**		host -- name of host
+**		addr -- address of host
+**
+**	Returns:
+**		true after successful update
+*/
+
+bool
+occ_close(e, mci, host, addr)
+	ENVELOPE *e;
+	MCI *mci;
+	const char *host;
+	SOCKADDR *addr;
+{
+	time_t now;
+#  if _FFR_USE_SEM_LOCKING && SM_CONF_SEM
+	int r;
+#  endif
+
+	if (occ == NULL || e == NULL)
+		return false;
+	if (mci == NULL || mci->mci_state == MCIS_CLOSED ||
+	    bitset(MCIF_CACHED, mci->mci_flags) ||
+	    !bitset(MCIF_OCC_INCR, mci->mci_flags))
+		return false;
+	mci->mci_flags &= ~MCIF_OCC_INCR;
+
+	now = curtime();
+
+	/* lock occ: lock entire shared memory segment */
+	SEM_LOCK(r);
+	(void) conn_limits(e, now, addr, SM_CLFL_EXC, occ, -1, -1);
+	SEM_UNLOCK(r);
+	return true;
+}
+# endif /* _FFR_OCC */
+
 /*
 **  UPD_QS -- update information about queue when adding/deleting an entry
 **
@@ -6732,15 +6879,9 @@ upd_qs(e, count, space, where)
 	/* XXX in theory this needs to be protected with a mutex */
 	if (QSHM_ENTRIES(idx) >= 0 && count != 0)
 	{
-# if _FFR_USE_SEM_LOCKING
-		if (SemId >= 0)
-			r = sm_sem_acq(SemId, 0, 1);
-# endif /* _FFR_USE_SEM_LOCKING */
+		SEM_LOCK(r);
 		QSHM_ENTRIES(idx) += count;
-# if _FFR_USE_SEM_LOCKING
-		if (SemId >= 0 && r >= 0)
-			r = sm_sem_rel(SemId, 0, 1);
-# endif /* _FFR_USE_SEM_LOCKING */
+		SEM_UNLOCK(r);
 	}
 
 	fidx = Queue[e->e_qgrp]->qg_qpaths[e->e_qdir].qp_fsysidx;
@@ -7007,12 +7148,18 @@ init_shm(qn, owner, hash)
 		QShm = (QUEUE_SHM_T *) OFF_QUEUE_SHM(Pshm);
 		PRSATmpCnt = (int *) OFF_RSA_TMP_CNT(Pshm);
 		*PRSATmpCnt = 0;
+# if _FFR_OCC
+		occ = (CHash_T *) OFF_OCC_SHM(Pshm);
+# endif
 		if (owner)
 		{
 			/* initialize values in shared memory */
 			NumFileSys = 0;
 			for (i = 0; i < qn; i++)
 				QShm[i].qs_entries = -1;
+# if _FFR_OCC
+			memset(occ, 0, OCC_SIZE);
+# endif
 		}
 		init_sem(owner);
 		return;
@@ -7685,13 +7832,17 @@ makeworkgroups()
 	{
 		si[i].sg_maxqrun = Queue[i]->qg_maxqrun;
 		si[i].sg_idx = i;
+
+		/* Hack to make sure BounceQueue ends up last */
+		if (IS_BOUNCE_QUEUE(i))
+			si[i].sg_maxqrun = INT_MIN;
 	}
 	qsort(si, NumQueue, sizeof(si[0]), cmpidx);
 
 	NumWorkGroups = 0;
 	for (i = 0; i < NumQueue; i++)
 	{
-		SKIP_BOUNCE_QUEUE
+		SKIP_BOUNCE_QUEUE(i)
 		total_runners += si[i].sg_maxqrun;
 		if (MaxQueueChildren <= 0 || total_runners <= MaxQueueChildren)
 			NumWorkGroups++;
@@ -7717,7 +7868,11 @@ makeworkgroups()
 	dir = 1;
 	for (i = 0; i < NumQueue; i++)
 	{
-		SKIP_BOUNCE_QUEUE
+		h = si[i].sg_idx;
+		if (tTd(41, 49))
+			sm_dprintf("sortqg: i=%d, j=%d, h=%d, skip=%d\n",
+				i, j, h, IS_BOUNCE_QUEUE(h));
+		SKIP_BOUNCE_QUEUE(h);
 
 		/* a to-and-fro packing scheme, continue from last position */
 		if (j >= NumWorkGroups)
@@ -7745,7 +7900,6 @@ makeworkgroups()
 				      (WorkGrp[j].wg_numqgrp + 1)));
 		}
 
-		h = si[i].sg_idx;
 		WorkGrp[j].wg_qgs[WorkGrp[j].wg_numqgrp] = Queue[h];
 		WorkGrp[j].wg_numqgrp++;
 		WorkGrp[j].wg_runners += Queue[h]->qg_maxqrun;
@@ -7782,6 +7936,9 @@ makeworkgroups()
 				sm_dprintf("%s, ",
 					WorkGrp[i].wg_qgs[j]->qg_name);
 			}
+			if (tTd(41, 12))
+				sm_dprintf("lowqintvl=%d",
+					(int) WorkGrp[i].wg_lowqintvl);
 			sm_dprintf("\n");
 		}
 	}
@@ -8433,6 +8590,7 @@ split_by_recipient(e)
 		if (split_within_queue(ee) == SM_SPLIT_FAIL)
 		{
 			e->e_sibling = firstsibling;
+			SM_FREE(lsplits);
 			return false;
 		}
 		ee->e_flags |= EF_SPLIT;
@@ -8447,8 +8605,7 @@ split_by_recipient(e)
 				if (p == NULL)
 				{
 					/* let's try to get this done */
-					sm_free(lsplits);
-					lsplits = NULL;
+					SM_FREE(lsplits);
 				}
 				else
 					lsplits = p;
@@ -8470,7 +8627,7 @@ split_by_recipient(e)
 	{
 		sm_syslog(LOG_NOTICE, e->e_id, "split: count=%d, id%s=%s",
 			  n - 1, n > 2 ? "s" : "", lsplits);
-		sm_free(lsplits);
+		SM_FREE(lsplits);
 	}
 	split = split_within_queue(e) != SM_SPLIT_FAIL;
 	if (split)

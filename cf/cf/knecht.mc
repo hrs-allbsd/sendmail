@@ -234,7 +234,7 @@ Kstorage macro
 
 LOCAL_RULESETS
 ######################################################################
-### check for the existance of the X-MailScanner Header
+### check for the existence of the X-MailScanner Header
 HX-MailScanner:		$>+CheckXMSc
 D{SobigFPat}Found to be clean
 D{SobigFMsg}This message may contain the Sobig.F virus.

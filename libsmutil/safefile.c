@@ -25,8 +25,7 @@ SM_RCSID("@(#)$Id: safefile.c,v 8.130 2013-11-22 20:51:50 ca Exp $")
 **		fn -- filename to check.
 **		uid -- user id to compare against.
 **		gid -- group id to compare against.
-**		user -- user name to compare against (used for group
-**			sets).
+**		user -- user name to compare against (used for group sets).
 **		flags -- modifiers:
 **			SFF_MUSTOWN -- "uid" must own this file.
 **			SFF_NOSLINK -- file cannot be a symbolic link.

@@ -35,6 +35,20 @@ SM_RCSID("@(#)$Id: daemon.c,v 8.698 2013-11-22 20:51:55 ca Exp $")
 # include <openssl/rand.h>
 #endif /* STARTTLS */
 
+#if NETINET6
+# define FREEHOSTENT(hp)		\
+	do				\
+	{				\
+		if (hp != NULL)		\
+		{			\
+			freehostent(hp);	\
+			hp = NULL;	\
+		}			\
+	} while (0)
+# else
+#  define FREEHOSTENT(hp)
+# endif
+
 #include <sm/time.h>
 
 #if IP_SRCROUTE && NETINET
@@ -58,6 +72,8 @@ SM_RCSID("@(#)$Id: daemon.c,v 8.698 2013-11-22 20:51:55 ca Exp $")
 #endif /* IP_SRCROUTE && NETINET */
 
 #include <sm/fdset.h>
+
+#include <ratectrl.h>
 
 #define DAEMON_C 1
 #include <daemon.h>
@@ -1677,10 +1693,7 @@ setsockaddroptions(p, d)
 						memmove(&d->d_addr.sin.sin_addr,
 							*(hp->h_addr_list),
 							INADDRSZ);
-# if NETINET6
-					freehostent(hp);
-					hp = NULL;
-# endif /* NETINET6 */
+					FREEHOSTENT(hp);
 				}
 			}
 			break;
@@ -1709,8 +1722,7 @@ setsockaddroptions(p, d)
 						memmove(&d->d_addr.sin6.sin6_addr,
 							*(hp->h_addr_list),
 							IN6ADDRSZ);
-					freehostent(hp);
-					hp = NULL;
+					FREEHOSTENT(hp);
 				}
 			}
 			break;
@@ -2510,10 +2522,7 @@ gothostent:
 		syserr("Can't connect to address family %d", addr.sa.sa_family);
 		mci_setstat(mci, EX_NOHOST, "5.1.2", NULL);
 		errno = EINVAL;
-#if NETINET6
-		if (hp != NULL)
-			freehostent(hp);
-#endif /* NETINET6 */
+		FREEHOSTENT(hp);
 		return EX_NOHOST;
 	}
 
@@ -2525,13 +2534,33 @@ gothostent:
 	/* if too many connections, don't bother trying */
 	if (!xla_noqueue_ok(host))
 	{
-# if NETINET6
-		if (hp != NULL)
-			freehostent(hp);
-# endif /* NETINET6 */
+		FREEHOSTENT(hp);
 		return EX_TEMPFAIL;
 	}
 #endif /* XLA */
+
+#if _FFR_OCC
+# define OCC_CLOSE occ_close(e, mci, host, &addr)
+	/* HACK!!!! just to see if this can work at all... */
+	if (occ_exceeded(e, mci, host, &addr))
+	{
+		FREEHOSTENT(hp);
+		sm_syslog(LOG_DEBUG, e->e_id,
+			"stat=occ_exceeded, host=%s, addr=%s",
+			host, anynet_ntoa(&addr));
+
+		/*
+		**  to get a more specific stat= message set errno
+		**  or make up one in sm, see sm_errstring()
+		*/
+
+		mci_setstat(mci, EX_TEMPFAIL, "4.4.5", "450 occ_exceeded"); /* check D.S.N */
+		errno = EAGAIN;
+		return EX_TEMPFAIL;
+	}
+#else /* _FFR_OCC */
+# define OCC_CLOSE
+#endif /* _FFR_OCC */
 
 	for (;;)
 	{
@@ -2563,11 +2592,9 @@ gothostent:
 			xla_host_end(host);
 #endif /* XLA */
 			mci_setstat(mci, EX_TEMPFAIL, "4.4.5", NULL);
-#if NETINET6
-			if (hp != NULL)
-				freehostent(hp);
-#endif /* NETINET6 */
+			FREEHOSTENT(hp);
 			errno = save_errno;
+			OCC_CLOSE;
 			return EX_TEMPFAIL;
 		}
 
@@ -2639,11 +2666,9 @@ gothostent:
 				errno = save_errno;
 				syserr("makeconnection: cannot bind socket [%s]",
 				       anynet_ntoa(&clt_addr));
-#if NETINET6
-				if (hp != NULL)
-					freehostent(hp);
-#endif /* NETINET6 */
+				FREEHOSTENT(hp);
 				errno = save_errno;
+				OCC_CLOSE;
 				return EX_TEMPFAIL;
 			}
 		}
@@ -2712,8 +2737,9 @@ gothostent:
 
 		if (LogLevel > 13)
 			sm_syslog(LOG_INFO, e->e_id,
-				  "makeconnection (%s [%s]) failed: %s",
-				  host, anynet_ntoa(&addr),
+				  "makeconnection (%s [%s].%d (%d)) failed: %s",
+				  host, anynet_ntoa(&addr), ntohs(port),
+				  (int) addr.sa.sa_family,
 				  sm_errstring(save_errno));
 
 #if NETINET6
@@ -2761,11 +2787,7 @@ nextaddr:
 					   sm_errstring(save_errno));
 			v6found = true;
 			family = AF_INET;
-			if (hp != NULL)
-			{
-				freehostent(hp);
-				hp = NULL;
-			}
+			FREEHOSTENT(hp);
 			goto v4retry;
 		}
 	v6tempfail:
@@ -2783,21 +2805,13 @@ nextaddr:
 		xla_host_end(host);
 #endif /* XLA */
 		mci_setstat(mci, EX_TEMPFAIL, "4.4.1", NULL);
-#if NETINET6
-		if (hp != NULL)
-			freehostent(hp);
-#endif /* NETINET6 */
+		FREEHOSTENT(hp);
 		errno = save_errno;
+		OCC_CLOSE;
 		return EX_TEMPFAIL;
 	}
 
-#if NETINET6
-	if (hp != NULL)
-	{
-		freehostent(hp);
-		hp = NULL;
-	}
-#endif /* NETINET6 */
+	FREEHOSTENT(hp);
 
 	/* connection ok, put it into canonical form */
 	mci->mci_out = NULL;
@@ -2816,6 +2830,7 @@ nextaddr:
 			(void) sm_io_close(mci->mci_out, SM_TIME_DEFAULT);
 		(void) close(s);
 		errno = save_errno;
+		OCC_CLOSE;
 		return EX_TEMPFAIL;
 	}
 	sm_io_automode(mci->mci_out, mci->mci_in);
@@ -2843,14 +2858,25 @@ nextaddr:
 	if (getsockname(s, &addr.sa, &len) == 0)
 	{
 		char *name;
-		char family[5];
 
-		macdefine(&BlankEnvelope.e_macro, A_TEMP,
-			macid("{if_addr_out}"), anynet_ntoa(&addr));
-		(void) sm_snprintf(family, sizeof(family), "%d",
-			addr.sa.sa_family);
-		macdefine(&BlankEnvelope.e_macro, A_TEMP,
-			macid("{if_family_out}"), family);
+		if (!isloopback(addr))
+		{
+			char familystr[5];
+
+			macdefine(&BlankEnvelope.e_macro, A_TEMP,
+				macid("{if_addr_out}"), anynet_ntoa(&addr));
+			(void) sm_snprintf(familystr, sizeof(familystr), "%d",
+				addr.sa.sa_family);
+			macdefine(&BlankEnvelope.e_macro, A_TEMP,
+				macid("{if_family_out}"), familystr);
+		}
+		else
+		{
+			macdefine(&BlankEnvelope.e_macro, A_PERM,
+				macid("{if_addr_out}"), NULL);
+			macdefine(&BlankEnvelope.e_macro, A_PERM,
+				macid("{if_family_out}"), NULL);
+		}
 
 		name = hostnamebyanyaddr(&addr);
 		macdefine(&BlankEnvelope.e_macro, A_TEMP,
@@ -3285,7 +3311,7 @@ myhostname(hostbuf, size)
 	*/
 
 	if (strchr(hostbuf, '.') == NULL &&
-	    !getcanonname(hostbuf, size, true, NULL))
+	    getcanonname(hostbuf, size, true, NULL) == HOST_NOTFOUND)
 	{
 		sm_syslog(LocalDaemon ? LOG_WARNING : LOG_CRIT, NOQID,
 			  "My unqualified host name (%s) unknown; sleeping for retry",
@@ -3293,7 +3319,7 @@ myhostname(hostbuf, size)
 		message("My unqualified host name (%s) unknown; sleeping for retry",
 			hostbuf);
 		(void) sleep(60);
-		if (!getcanonname(hostbuf, size, true, NULL))
+		if (getcanonname(hostbuf, size, true, NULL) == HOST_NOTFOUND)
 		{
 			sm_syslog(LocalDaemon ? LOG_WARNING : LOG_ALERT, NOQID,
 				  "unable to qualify my own domain name (%s) -- using short name",
@@ -3488,10 +3514,7 @@ getauthinfo(fd, may_be_forged)
 					break;
 				}
 			}
-#if NETINET6
-			freehostent(hp);
-			hp = NULL;
-#endif /* NETINET6 */
+			FREEHOSTENT(hp);
 		}
 	}
 
@@ -3970,6 +3993,10 @@ host_map_lookup(map, name, av, statp)
 			       s->s_namecanon.nc_herrno);
 			return NULL;
 		}
+		if (bitset(NCF_SECURE, s->s_namecanon.nc_flags))
+			map->map_mflags |= MF_SECURE;
+		else
+			map->map_mflags &= ~MF_SECURE;
 		if (bitset(MF_MATCHONLY, map->map_mflags))
 			cp = map_rewrite(map, name, strlen(name), NULL);
 		else
@@ -4021,15 +4048,28 @@ host_map_lookup(map, name, av, statp)
 	s->s_namecanon.nc_exp = now + SM_DEFAULT_TTL;
 	if (*name != '[')
 	{
-		int ttl;
+		int ttl, r;
 
 		(void) sm_strlcpy(hbuf, name, sizeof(hbuf));
-		if (getcanonname(hbuf, sizeof(hbuf) - 1, !HasWildcardMX, &ttl))
+
+		r = getcanonname(hbuf, sizeof(hbuf) - 1, !HasWildcardMX, &ttl);
+		if (r != HOST_NOTFOUND)
 		{
 			ans = hbuf;
 			if (ttl > 0)
 				s->s_namecanon.nc_exp = now + SM_MIN(ttl,
 								SM_DEFAULT_TTL);
+
+			if (HOST_SECURE == r)
+			{
+				s->s_namecanon.nc_flags |= NCF_SECURE;
+				map->map_mflags |= MF_SECURE;
+			}
+			else
+			{
+				s->s_namecanon.nc_flags &= ~NCF_SECURE;
+				map->map_mflags &= ~MF_SECURE;
+			}
 		}
 	}
 	else
@@ -4043,6 +4083,9 @@ host_map_lookup(map, name, av, statp)
 		*cp = '\0';
 
 		hp = NULL;
+
+		/* should this be considered secure? */
+		map->map_mflags &= ~MF_SECURE;
 #if NETINET
 		if ((in_addr.s_addr = inet_addr(&name[1])) != INADDR_NONE)
 			hp = sm_gethostbyaddr((char *)&in_addr,
@@ -4069,8 +4112,7 @@ host_map_lookup(map, name, av, statp)
 				(void) sm_strlcpy(n, ans, sizeof(n));
 				ans = n;
 			}
-			freehostent(hp);
-			hp = NULL;
+			FREEHOSTENT(hp);
 #endif /* NETINET6 */
 		}
 	}
@@ -4284,7 +4326,7 @@ anynet_ntop(s6a, dst, dst_len)
 **
 **	Returns:
 **		1 if the address was valid
-**		0 if the address wasn't parseable
+**		0 if the address wasn't parsable
 **		-1 if error
 */
 
@@ -4475,19 +4517,13 @@ hostnamebyanyaddr(sap)
 			(void) sm_strlcpy(n, name, sizeof(n));
 			name = n;
 		}
-		freehostent(hp);
+		FREEHOSTENT(hp);
 #  endif /* NETINET6 */
 		return name;
 	}
 # endif /* NETINET || NETINET6 */
 
-# if NETINET6
-	if (hp != NULL)
-	{
-		freehostent(hp);
-		hp = NULL;
-	}
-# endif /* NETINET6 */
+	FREEHOSTENT(hp);
 
 # if NETUNIX
 	if (sap->sa.sa_family == AF_UNIX && sap->sunix.sun_path[0] == '\0')

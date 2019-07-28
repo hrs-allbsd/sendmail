@@ -72,17 +72,17 @@ ERROR: do not compile with CI_LAST < CI_EOM
 #if CI_LAST < CI_EOH
 ERROR: do not compile with CI_LAST < CI_EOH
 #endif
-#if CI_LAST < CI_ENVRCPT
-ERROR: do not compile with CI_LAST < CI_ENVRCPT
+#if CI_LAST < CI_RCPT
+ERROR: do not compile with CI_LAST < CI_RCPT
 #endif
-#if CI_LAST < CI_ENVFROM
-ERROR: do not compile with CI_LAST < CI_ENVFROM
+#if CI_LAST < CI_MAIL
+ERROR: do not compile with CI_LAST < CI_MAIL
 #endif
 #if CI_LAST < CI_HELO
 ERROR: do not compile with CI_LAST < CI_HELO
 #endif
-#if CI_LAST < CI_CONNECT
-ERROR: do not compile with CI_LAST < CI_CONNECT
+#if CI_LAST < CI_CONN
+ERROR: do not compile with CI_LAST < CI_CONN
 #endif
 #if CI_LAST >= MAX_MACROS_ENTRIES
 ERROR: do not compile with CI_LAST >= MAX_MACROS_ENTRIES
@@ -628,7 +628,7 @@ sendreply(r, sd, timeout_ptr, ctx)
 		{
 			/* milter said it wouldn't reply, but it lied... */
 			smi_log(SMI_LOG_ERR,
-				"%s: milter claimed not to reply in state %d but did anyway %d\n",
+				"%s: milter claimed not to reply in state %d but did anyway %d",
 				ctx->ctx_smfi->xxfi_name,
 				ctx->ctx_state, r);
 
@@ -1100,7 +1100,7 @@ st_optionneg(g)
 	{
 		/*
 		**  Older MTAs do not support some protocol steps.
-		**  As this protocol is a bit "wierd" (it asks for steps
+		**  As this protocol is a bit "weird" (it asks for steps
 		**  NOT to be taken/sent) we have to check whether we
 		**  should turn off those "negative" requests.
 		**  Currently these are only SMFIP_NODATA and SMFIP_NOUNKNOWN.
@@ -1186,7 +1186,7 @@ st_connectinfo(g)
 	s = g->a_buf;
 	i = 0;
 	l = g->a_len;
-	while (s[i] != '\0' && i <= l)
+	while (i <= l && s[i] != '\0')  
 		++i;
 	if (i + 1 >= l)
 		return _SMFIS_ABORT;

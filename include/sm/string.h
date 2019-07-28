@@ -109,5 +109,7 @@ sm_strtoull __P((const char *, char**, int));
 
 extern void
 stripquotes __P((char *));
+extern void
+unfoldstripquotes __P((char *));
 
 #endif /* SM_STRING_H */

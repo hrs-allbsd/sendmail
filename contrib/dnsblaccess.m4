@@ -24,7 +24,7 @@ dnl ##	email.  A tempfail-message value of `t' temporarily rejects
 dnl ##	with a default message.  Otherwise the value should be your
 dnl ##	own message.  The keytag is used to lookup the access map to
 dnl ##	further refine the result.  I recommend a qualified keytag
-dnl ##	(containing a ".") as less likely to accidently conflict with
+dnl ##	(containing a ".") as less likely to accidentally conflict with
 dnl ##	other access tags.
 dnl ##
 dnl ##	This is best illustrated with an example.  Please do not use

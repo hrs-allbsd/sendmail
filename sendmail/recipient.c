@@ -112,9 +112,9 @@ sortbysignature(xx, yy)
 
 	/* Let's avoid redoing the signature over and over again */
 	if (xx->q_signature == NULL)
-		xx->q_signature = hostsignature(xx->q_mailer, xx->q_host);
+		xx->q_signature = hostsignature(xx->q_mailer, xx->q_host, xx->q_flags & QSECURE);
 	if (yy->q_signature == NULL)
-		yy->q_signature = hostsignature(yy->q_mailer, yy->q_host);
+		yy->q_signature = hostsignature(yy->q_mailer, yy->q_host, yy->q_flags & QSECURE);
 	ret = strcmp(xx->q_signature, yy->q_signature);
 
 	/*

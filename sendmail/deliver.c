@@ -26,6 +26,7 @@ SM_RCSID("@(#)$Id: deliver.c,v 8.1030 2013-11-22 20:51:55 ca Exp $")
 
 #if STARTTLS || SASL
 # include "sfsasl.h"
+# include "tls.h"
 #endif /* STARTTLS || SASL */
 
 static int	deliver __P((ENVELOPE *, ADDRESS *));
@@ -44,6 +45,10 @@ static int	endtlsclt __P((MCI *));
 # if STARTTLS || SASL
 static bool	iscltflgset __P((ENVELOPE *, int));
 # endif /* STARTTLS || SASL */
+
+#if _FFR_OCC
+# include <ratectrl.h>
+#endif
 
 /*
 **  SENDALL -- actually send all the messages.
@@ -1231,8 +1236,7 @@ should_try_fbsh(e, tried_fallbacksmarthost, hostbuf, hbsz, status)
 **	user on the head of the list.  It is clever about mailers
 **	that don't handle multiple users.  It is NOT guaranteed
 **	that it will deliver to all these addresses however -- so
-**	deliver should be called once for each address on the
-**	list.
+**	deliver should be called once for each address on the list.
 **	Deliver tries to be as opportunistic as possible about piggybacking
 **	messages. Some definitions to make understanding easier follow below.
 **	Piggybacking occurs when an existing connection to a mail host can
@@ -1322,6 +1326,10 @@ deliver(e, firstto)
 	SM_NONVOLATILE bool goodmxfound = false; /* at least one MX was OK */
 	bool ovr;
 	bool quarantine;
+#if STARTTLS
+	/* 0: try TLS, 1: try without TLS again, >1: don't try again */
+	int tlsstate;
+#endif
 	int strsize;
 	int rcptcount;
 	int ret;
@@ -1349,6 +1357,9 @@ deliver(e, firstto)
 	e->e_statmsg = NULL;
 	SmtpError[0] = '\0';
 	xstart = curtime();
+#if STARTTLS
+	tlsstate = 0;
+#endif
 
 	if (tTd(10, 1))
 		sm_dprintf("\n--deliver, id=%s, mailer=%s, host=`%s', first user=`%s'\n",
@@ -1495,7 +1506,8 @@ deliver(e, firstto)
 	ctladdr = NULL;
 	if (firstto->q_signature == NULL)
 		firstto->q_signature = hostsignature(firstto->q_mailer,
-						     firstto->q_host);
+						     firstto->q_host,
+						     firstto->q_flags & QSECURE);
 	firstsig = firstto->q_signature;
 
 	for (; to != NULL; to = to->q_next)
@@ -1519,7 +1531,8 @@ deliver(e, firstto)
 
 		if (to->q_signature == NULL) /* for safety */
 			to->q_signature = hostsignature(to->q_mailer,
-							to->q_host);
+							to->q_host,
+							to->q_flags & QSECURE);
 
 		/*
 		**  This is for coincidental and tailcoat piggybacking messages
@@ -1975,7 +1988,8 @@ deliver(e, firstto)
 # endif /* NETUNIX */
 		{
 			CurHostName = pv[1];
-			curhost = hostsignature(m, pv[1]);
+							/* XXX ??? */
+			curhost = hostsignature(m, pv[1], firstto->q_flags & QSECURE);
 		}
 
 		if (curhost == NULL || curhost[0] == '\0')
@@ -2073,6 +2087,9 @@ tryhost:
 			hostnum++;
 			if (endp != NULL)
 				*endp = sep;
+#if STARTTLS
+			tlsstate = 0;
+#endif
 
   one_last_try:
 			/* see if we already know that this host is fried */
@@ -2901,11 +2918,25 @@ tryhost:
 				  macid("{server_addr}"), "0");
 		}
 
+#  if _FFR_TLSA_DANE
+		SM_FREE(Dane_vrfy_ctx.dane_vrfy_host);
+		Dane_vrfy_ctx.dane_vrfy_host = sm_strdup(srvname);
+#  endif
+
 		/* undo change of srvname (mci->mci_host) */
 		if (dotpos >= 0)
 			srvname[dotpos] = '.';
 
 reconnect:	/* after switching to an encrypted connection */
+#  if _FFR_TLSA_DANE
+		if (DONE_STARTTLS(mci->mci_flags))
+		{
+			/* use a "reset" function? */
+			SM_FREE(Dane_vrfy_ctx.dane_vrfy_host);
+			Dane_vrfy_ctx.dane_vrfy_res = 0;
+		}
+#  endif
+
 # endif /* STARTTLS || SASL */
 
 		/* set the current connection information */
@@ -2960,6 +2991,8 @@ reconnect:	/* after switching to an encrypted connection */
 			usetls = bitset(MCIF_TLS, mci->mci_flags);
 			if (usetls)
 				usetls = !iscltflgset(e, D_NOTLS);
+			if (usetls)
+				usetls = tlsstate == 0;
 
 			host = macvalue(macid("{server_name}"), e);
 			if (usetls)
@@ -3025,8 +3058,33 @@ reconnect:	/* after switching to an encrypted connection */
 				}
 			}
 			else
+			{
+				p = tlsstate == 0 ? "NONE": "CLEAR";
+#  if _FFR_TLSA_DANE
+				/*
+				**  TLSA found but STARTTLS not offered?
+				**  What is the best way to "fail"?
+				*/
+
+				if (!bitset(MCIF_TLS, mci->mci_flags))
+				{
+					STAB *s;
+
+					s = stab(host, ST_TLSA_RR, ST_FIND);
+					if (s != NULL && s->s_tlsa != NULL &&
+					    s->s_tlsa->dane_tlsa_n > 0)
+					{
+						/* XXX: check expiration!  */
+						sm_syslog(LOG_INFO, NOQID,
+							  "STARTTLS=client, relay=%.100s, tlsa_rrs=%d, starttls=not_offered_by_server",
+							  host, s->s_tlsa->dane_tlsa_n);
+						p = "DANE_FAIL";
+					}
+				}
+#  endif /* _FFR_TLSA_DANE */
 				macdefine(&e->e_macro, A_PERM,
-					  macid("{verify}"), "NONE");
+					  macid("{verify}"), p);
+			}
 			olderrors = Errors;
 			QuickAbort = false;
 			SuprErrs = true;
@@ -3077,6 +3135,20 @@ reconnect:	/* after switching to an encrypted connection */
 					}
 					mci->mci_flags &= ~MCIF_TLSACT;
 					(void) endmailer(mci, e, pv);
+
+					if ((TLSFallbacktoClear ||
+					     SM_TLSI_IS(&(mci->mci_tlsi),
+							TLSI_FL_FB2CLR)) &&
+					    !SM_TLSI_IS(&(mci->mci_tlsi),
+							TLSI_FL_NOFB2CLR)
+#if _FFR_TLSA_DANE
+					     && Dane_vrfy_ctx.dane_vrfy_chk !=
+						DANE_SECURE
+#endif
+					    )
+					{
+						++tlsstate;
+					}
 				}
 				else
 				{
@@ -3119,6 +3191,28 @@ reconnect:	/* after switching to an encrypted connection */
 				mci_clr_extensions(mci);
 				goto reconnect;
 			}
+			if (tlsstate == 1)
+			{
+				if (tTd(11, 1))
+				{
+					sm_syslog(LOG_DEBUG, NOQID,
+						"STARTTLS=client, relay=%.100s, tlsstate=%d, status=trying_again",
+						mci->mci_host, tlsstate);
+					mci_dump(NULL, mci, true);
+				}
+				++tlsstate;
+
+				/*
+				**  Fake the status so a new connection is
+				**  tried, otherwise the TLS error will
+				**  "persist" during this delivery attempt.
+				*/
+
+				mci->mci_errno = 0;
+				rcode = EX_OK;
+				mci_setstat(mci, rcode, NULL, NULL);
+				goto one_last_try;
+}
 		}
 # endif /* STARTTLS */
 # if SASL
@@ -3621,6 +3715,23 @@ do_transfer:
 		markstats(e, tochain, STATS_NORMAL);
 	mci_store_persistent(mci);
 
+#if _FFR_OCC
+	/*
+	**  HACK: this is NOT the right place to "close" a connection!
+	**  use smtpquit?
+	**  add a flag to mci to indicate that rate/conc. was increased?
+	*/
+
+	if (clever)
+	{
+		extern SOCKADDR CurHostAddr;
+
+		/* check family... {} */
+		/* r = anynet_pton(AF_INET, p, dst); */
+		occ_close(e, mci, host, &CurHostAddr);
+	}
+#endif /* _FFR_OCC */
+
 	/* Some recipients were tempfailed, try them on the next host */
 	if (mci != NULL && mci->mci_retryrcpt && nummxhosts > hostnum)
 	{
@@ -3722,13 +3833,10 @@ markfailure(e, q, mci, rcode, ovr)
 		if (mci->mci_rstatus != NULL)
 			rstatus = sm_rpool_strdup_x(e->e_rpool,
 						    mci->mci_rstatus);
-		else
-			rstatus = NULL;
 	}
 	else if (e->e_status != NULL)
 	{
 		status = e->e_status;
-		rstatus = NULL;
 	}
 	else
 	{
@@ -5738,6 +5846,7 @@ mailfiletimeout(ignore)
 **	Parameters:
 **		m -- the mailer describing this host.
 **		host -- the host name.
+**		ad -- DNSSEC: ad
 **
 **	Returns:
 **		The signature for this host.
@@ -5749,9 +5858,10 @@ mailfiletimeout(ignore)
 #define MAXHOSTSIGNATURE	8192	/* max len of hostsignature */
 
 char *
-hostsignature(m, host)
+hostsignature(m, host, ad)
 	register MAILER *m;
 	char *host;
+	bool ad;
 {
 	register char *p;
 	register STAB *s;
@@ -5868,8 +5978,9 @@ hostsignature(m, host)
 			auto int rcode;
 			int ttl;
 
-			nmx = getmxrr(hp, mxhosts, mxprefs, true, &rcode, true,
-				      &ttl);
+			nmx = getmxrr(hp, mxhosts, mxprefs,
+				      DROPLOCALHOST|TRYFALLBACK|(ad ? ISAD :0),
+				      &rcode, &ttl);
 			if (nmx <= 0)
 			{
 				int save_errno;
@@ -6139,8 +6250,16 @@ initclttls(tls_ok)
 	if (clt_ctx != NULL)
 		return true;	/* already done */
 	tls_ok_clt = inittls(&clt_ctx, TLS_I_CLT, Clt_SSL_Options, false,
-			     CltCertFile, CltKeyFile,
-			     CACertPath, CACertFile, DHParams);
+			CltCertFile, CltKeyFile,
+#if _FFR_CLIENTCA
+			(CltCACertPath != NULL) ? CltCACertPath :
+#endif
+				CACertPath,
+#if _FFR_CLIENTCA
+			(CltCACertFile != NULL) ? CltCACertFile :
+#endif
+				CACertFile,
+			DHParams);
 	return tls_ok_clt;
 }
 
@@ -6169,19 +6288,18 @@ starttls(m, mci, e)
 	int rfd, wfd;
 	SSL *clt_ssl = NULL;
 	time_t tlsstart;
+	extern int TLSsslidx;
 
 	if (clt_ctx == NULL && !initclttls(true))
 		return EX_TEMPFAIL;
 
-# if USE_OPENSSL_ENGINE
-	if (!SSLEngineInitialized && !SSL_set_engine(NULL))
+	if (!TLS_set_engine(SSLEngine, false))
 	{
 		sm_syslog(LOG_ERR, NOQID,
-			  "STARTTLS=client, SSL_set_engine=failed");
+			  "STARTTLS=client, engine=%s, TLS_set_engine=failed",
+			  SSLEngine);
 		return EX_TEMPFAIL;
 	}
-	SSLEngineInitialized = true;
-# endif /* USE_OPENSSL_ENGINE */
 
 	smtpmessage("STARTTLS", m, mci);
 
@@ -6213,19 +6331,36 @@ starttls(m, mci, e)
 		{
 			sm_syslog(LOG_ERR, NOQID,
 				  "STARTTLS=client, error: SSL_new failed");
-			if (LogLevel > 9)
-				tlslogerr(LOG_WARNING, "client");
+			tlslogerr(LOG_WARNING, 9, "client");
 		}
 		return EX_SOFTWARE;
 	}
 	/* SSL_clear(clt_ssl); ? */
 
-	if (get_tls_se_options(e, clt_ssl, false) != 0)
+	if (get_tls_se_options(e, clt_ssl, &mci->mci_tlsi, false) != 0)
 	{
 		sm_syslog(LOG_ERR, NOQID,
 			  "STARTTLS=client, get_tls_se_options=fail");
 		return EX_SOFTWARE;
 	}
+	result = SSL_set_ex_data(clt_ssl, TLSsslidx, &mci->mci_tlsi);
+	if (0 == result)
+	{
+		if (LogLevel > 5)
+		{
+			sm_syslog(LOG_ERR, NOQID,
+				  "STARTTLS=client, error: SSL_set_ex_data failed=%d",
+				  result);
+			tlslogerr(LOG_WARNING, 9, "client");
+		}
+		return EX_SOFTWARE;
+	}
+#if _FFR_TLSA_DANE
+	if (SM_TLSI_IS(&(mci->mci_tlsi), TLSI_FL_NODANE))
+		Dane_vrfy_ctx.dane_vrfy_chk = DANE_NEVER;
+	else
+		Dane_vrfy_ctx.dane_vrfy_chk = Dane;
+#endif
 
 	rfd = sm_io_getinfo(mci->mci_in, SM_IO_WHAT_FD, NULL);
 	wfd = sm_io_getinfo(mci->mci_out, SM_IO_WHAT_FD, NULL);
@@ -6239,8 +6374,7 @@ starttls(m, mci, e)
 			sm_syslog(LOG_ERR, NOQID,
 				  "STARTTLS=client, error: SSL_set_xfd failed=%d",
 				  result);
-			if (LogLevel > 9)
-				tlslogerr(LOG_WARNING, "client");
+			tlslogerr(LOG_WARNING, 9, "client");
 		}
 		return EX_SOFTWARE;
 	}
@@ -6270,12 +6404,10 @@ ssl_retry:
 				  "STARTTLS=client, error: connect failed=%d, reason=%s, SSL_error=%d, errno=%d, retry=%d",
 				  result, sr == NULL ? "unknown" : sr, ssl_err,
 				  save_errno, i);
-			if (LogLevel > 9)
-				tlslogerr(LOG_WARNING, "client");
+			tlslogerr(LOG_WARNING, 9, "client");
 		}
 
-		SSL_free(clt_ssl);
-		clt_ssl = NULL;
+		SM_SSL_FREE(clt_ssl);
 		return EX_SOFTWARE;
 	}
 	mci->mci_ssl = clt_ssl;
@@ -6287,8 +6419,7 @@ ssl_retry:
 		return EX_OK;
 
 	/* failure */
-	SSL_free(clt_ssl);
-	clt_ssl = NULL;
+	SM_SSL_FREE(clt_ssl);
 	return EX_SOFTWARE;
 }
 /*
@@ -6309,7 +6440,7 @@ endtlsclt(mci)
 
 	if (!bitset(MCIF_TLSACT, mci->mci_flags))
 		return EX_OK;
-	r = endtls(mci->mci_ssl, "client");
+	r = endtls(&mci->mci_ssl, "client");
 	mci->mci_flags &= ~MCIF_TLSACT;
 	return r;
 }

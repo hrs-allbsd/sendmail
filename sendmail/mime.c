@@ -282,7 +282,7 @@ mime8to7(mci, header, e, boundaries, flags, level)
 		else
 		{
 			p = argv[i].a_value;
-			stripquotes(p);
+			unfoldstripquotes(p);
 		}
 		if (sm_strlcpy(bbuf, p, sizeof(bbuf)) >= sizeof(bbuf))
 		{

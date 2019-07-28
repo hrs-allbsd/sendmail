@@ -323,7 +323,7 @@ dropenvelope(e, fulldrop, split)
 
 			/* don't free, allocated from e_rpool */
 			e->e_message = sm_rpool_strdup_x(e->e_rpool, buf);
-			message(buf);
+			message("%s", buf);
 			e->e_flags |= EF_CLRQUEUE;
 		}
 		if (msg_timeout == MSG_NOT_BY)
@@ -420,7 +420,7 @@ dropenvelope(e, fulldrop, split)
 				/* don't free, allocated from e_rpool */
 				e->e_message = sm_rpool_strdup_x(e->e_rpool,
 								 buf);
-				message(buf);
+				message("%s", buf);
 				e->e_flags |= EF_WARNING;
 			}
 			if (msg_timeout == MSG_WARN_BY)
@@ -446,8 +446,8 @@ dropenvelope(e, fulldrop, split)
 			failure_return, delay_return, success_return, queueit);
 
 	/*
-	**  If we had some fatal error, but no addresses are marked as
-	**  bad, mark them _all_ as bad.
+	**  If we had some fatal error, but no addresses are marked as bad,
+	**  mark all OK/VERIFIED addresses as bad (if QPINGONFAILURE).
 	*/
 
 	if (bitset(EF_FATALERRS, e->e_flags) && !failure_return)
@@ -455,8 +455,21 @@ dropenvelope(e, fulldrop, split)
 		for (q = e->e_sendqueue; q != NULL; q = q->q_next)
 		{
 			if ((QS_IS_OK(q->q_state) ||
-			     QS_IS_VERIFIED(q->q_state)) &&
-			    bitset(QPINGONFAILURE, q->q_flags))
+			     QS_IS_VERIFIED(q->q_state))
+			    && bitset(QPINGONFAILURE, q->q_flags)
+
+			/*
+			**  do not mark an address as bad if
+			**  - the address itself is stored in the queue
+			**  - the DeliveryMode requires queueing
+			**  - the envelope is queued
+			*/
+
+			    && !(bitset(QQUEUED, q->q_flags)
+				 && WILL_BE_QUEUED(e->e_sendmode)
+				 && bitset(EF_INQUEUE, e->e_flags)
+				)
+			   )
 			{
 				failure_return = true;
 				q->q_state = QS_BADADDR;
@@ -1271,8 +1284,6 @@ static struct eflags	EnvelopeFlags[] =
 	{ "LOGSENDER",		EF_LOGSENDER	},
 	{ "NORECEIPT",		EF_NORECEIPT	},
 	{ "HAS8BIT",		EF_HAS8BIT	},
-	{ "NL_NOT_EOL",		EF_NL_NOT_EOL	},
-	{ "CRLF_NOT_EOL",	EF_CRLF_NOT_EOL	},
 	{ "RET_PARAM",		EF_RET_PARAM	},
 	{ "HAS_DF",		EF_HAS_DF	},
 	{ "IS_MIME",		EF_IS_MIME	},
@@ -1281,6 +1292,8 @@ static struct eflags	EnvelopeFlags[] =
 	{ "TOOBIG",		EF_TOOBIG	},
 	{ "SPLIT",		EF_SPLIT	},
 	{ "UNSAFE",		EF_UNSAFE	},
+	{ "TOODEEP",		EF_TOODEEP	},
+	{ "SECURE",		EF_SECURE	},
 	{ NULL,			0		}
 };
 

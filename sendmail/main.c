@@ -16,6 +16,7 @@
 #include <sm/sendmail.h>
 #include <sm/xtrap.h>
 #include <sm/signal.h>
+#include <tls.h>
 
 #ifndef lint
 SM_UNUSED(static char copyright[]) =
@@ -31,10 +32,11 @@ SM_RCSID("@(#)$Id: main.c,v 8.988 2013-11-23 02:52:37 gshapiro Exp $")
 
 #if NETINET || NETINET6
 # include <arpa/inet.h>
-#endif /* NETINET || NETINET6 */
+#endif
 
 /* for getcfname() */
 #include <sendmail/pathnames.h>
+#include <ratectrl.h>
 
 static SM_DEBUG_T
 DebugNoPRestart = SM_DEBUG_INITIALIZER("no_persistent_restart",
@@ -51,7 +53,7 @@ static SIGFUNC_DECL	sigpipe __P((int));
 static SIGFUNC_DECL	sigterm __P((int));
 #ifdef SIGUSR1
 static SIGFUNC_DECL	sigusr1 __P((int));
-#endif /* SIGUSR1 */
+#endif
 
 /*
 **  SENDMAIL -- Post mail to a set of destinations.
@@ -104,7 +106,7 @@ char		*Mbdb = "pw";	/* mailbox database defaults to /etc/passwd */
 
 #ifdef NGROUPS_MAX
 GIDSET_T	InitialGidSet[NGROUPS_MAX];
-#endif /* NGROUPS_MAX */
+#endif
 
 #define MAXCONFIGLEVEL	10	/* highest config version level known */
 
@@ -122,7 +124,7 @@ int		SyslogPrefixLen; /* estimated length of syslog prefix */
 #define PIDLEN		6	/* pid length for computing SyslogPrefixLen */
 #ifndef SL_FUDGE
 # define SL_FUDGE	10	/* fudge offset for SyslogPrefixLen */
-#endif /* ! SL_FUDGE */
+#endif
 #define SLDLL		8	/* est. length of default syslog label */
 
 
@@ -194,7 +196,7 @@ main(argc, argv, envp)
 	char *emptyenviron[1];
 #if STARTTLS
 	bool tls_ok;
-#endif /* STARTTLS */
+#endif
 	QUEUE_CHAR *new;
 	ENVELOPE *e;
 	extern int DtableSize;
@@ -204,11 +206,11 @@ main(argc, argv, envp)
 	extern char **environ;
 #if SASL
 	extern void sm_sasl_init __P((void));
-#endif /* SASL */
+#endif
 
 #if USE_ENVIRON
 	envp = environ;
-#endif /* USE_ENVIRON */
+#endif
 
 	/* turn off profiling */
 	SM_PROF(0);
@@ -277,12 +279,12 @@ main(argc, argv, envp)
 #if LOG
 # ifndef SM_LOG_STR
 #  define SM_LOG_STR	"sendmail"
-# endif /* ! SM_LOG_STR */
+# endif
 #  ifdef LOG_MAIL
 	openlog(SM_LOG_STR, LOG_PID, LOG_MAIL);
-#  else /* LOG_MAIL */
+#  else
 	openlog(SM_LOG_STR, LOG_PID);
-#  endif /* LOG_MAIL */
+#  endif
 #endif /* LOG */
 
 	/*
@@ -308,11 +310,11 @@ main(argc, argv, envp)
 	LocalDaemon = false;
 # if NETINET6
 	V6LoopbackAddrFound = false;
-# endif /* NETINET6 */
-#endif /* _FFR_LOCAL_DAEMON */
+# endif
+#endif
 #if XDEBUG
 	checkfd012("after openlog");
-#endif /* XDEBUG */
+#endif
 
 	tTsetup(tTdvect, sizeof(tTdvect), "0-99.1,*_trace_*.1");
 
@@ -382,7 +384,7 @@ main(argc, argv, envp)
 #endif /* defined(sony_news) */
 #ifndef OPTIONS
 # define OPTIONS	"A:B:b:C:cD:d:e:F:f:Gh:IiL:M:mN:nO:o:p:Q:q:R:r:sTtV:vX:"
-#endif /* ! OPTIONS */
+#endif
 
 	/* Set to 0 to allow -b; need to check optarg before using it! */
 	opterr = 0;
@@ -509,9 +511,9 @@ main(argc, argv, envp)
 		closelog();
 #  ifdef LOG_MAIL
 		openlog(sysloglabel, LOG_PID, LOG_MAIL);
-#  else /* LOG_MAIL */
+#  else
 		openlog(sysloglabel, LOG_PID);
-#  endif /* LOG_MAIL */
+#  endif
 	}
 #endif /* LOG */
 
@@ -616,7 +618,7 @@ main(argc, argv, envp)
 		sm_printoptions(OsCompileOptions);
 #ifdef _PATH_UNIX
 		sm_dprintf("Kernel symbols:\t%s\n", _PATH_UNIX);
-#endif /* _PATH_UNIX */
+#endif
 
 		sm_dprintf("     Conf file:\t%s (default for MSP)\n",
 			   getcfname(OpMode, SubmitMode, SM_GET_SUBMIT_CF,
@@ -650,7 +652,7 @@ main(argc, argv, envp)
 		sm_dprintf("       OpenSSL: compiled 0x%08x\n",
 			   (uint) OPENSSL_VERSION_NUMBER);
 		sm_dprintf("       OpenSSL: linked   0x%08x\n",
-			   (uint) SSLeay());
+			   (uint) TLS_version_num());
 	}
 #endif /* STARTTLS */
 
@@ -700,7 +702,7 @@ main(argc, argv, envp)
 		_res.options &= ~RES_DEBUG;
 # ifdef RES_NOALIASES
 	_res.options |= RES_NOALIASES;
-# endif /* RES_NOALIASES */
+# endif
 	TimeOuts.res_retry[RES_TO_DEFAULT] = _res.retry;
 	TimeOuts.res_retry[RES_TO_FIRST] = _res.retry;
 	TimeOuts.res_retry[RES_TO_NORMAL] = _res.retry;
@@ -768,7 +770,7 @@ main(argc, argv, envp)
 # endif /* NETINET6 */
 # if NETINET
 			struct in_addr ia;
-# endif /* NETINET */
+# endif
 			char ipbuf[103];
 
 			ipbuf[0] = '\0';
@@ -809,7 +811,7 @@ main(argc, argv, envp)
 #if NETINET6
 		freehostent(hp);
 		hp = NULL;
-#endif /* NETINET6 */
+#endif
 	}
 
 	/* current time */
@@ -1193,7 +1195,7 @@ main(argc, argv, envp)
 #if defined(__osf__) || defined(_AIX3)
 		  case 'x':	/* random flag that OSF/1 & AIX mailx passes */
 			break;
-#endif /* defined(__osf__) || defined(_AIX3) */
+#endif
 #if defined(sony_news)
 		  case 'E':
 		  case 'J':	/* ignore flags for Japanese code conversion
@@ -1241,14 +1243,14 @@ main(argc, argv, envp)
 
 #if XDEBUG
 	checkfd012("before readcf");
-#endif /* XDEBUG */
+#endif
 	vendor_pre_defaults(&BlankEnvelope);
 
 	readcf(getcfname(OpMode, SubmitMode, cftype, conffile),
 			 safecf, &BlankEnvelope);
 #if !defined(_USE_SUN_NSSWITCH_) && !defined(_USE_DEC_SVC_CONF_)
 	ConfigFileRead = true;
-#endif /* !defined(_USE_SUN_NSSWITCH_) && !defined(_USE_DEC_SVC_CONF_) */
+#endif
 	vendor_post_defaults(&BlankEnvelope);
 
 	/* now we can complain about missing fds */
@@ -1320,7 +1322,7 @@ main(argc, argv, envp)
 #if NAMED_BIND
 	if (FallbackMX != NULL)
 		(void) getfallbackmxrr(FallbackMX);
-#endif /* NAMED_BIND */
+#endif
 
 	if (SuperSafe == SAFE_INTERACTIVE && !SM_IS_INTERACTIVE(CurEnv->e_sendmode))
 	{
@@ -1343,6 +1345,12 @@ main(argc, argv, envp)
 	if (sm_signal(SIGINT, SIG_IGN) != SIG_IGN)
 		(void) sm_signal(SIGINT, intsig);
 	(void) sm_signal(SIGTERM, intsig);
+
+#if _FFR_TLSA_DANE
+	/* Turn on necessary resolver options for DANE */
+	if (Dane != DANE_NEVER)
+		_res.options |= RES_USE_EDNS0|RES_USE_DNSSEC;
+#endif
 
 	/* Enforce use of local time (null string overrides this) */
 	if (TimeZoneSpec == NULL)
@@ -1391,7 +1399,7 @@ main(argc, argv, envp)
 #if NAMED_BIND
 	_res.retry = TimeOuts.res_retry[RES_TO_DEFAULT];
 	_res.retrans = TimeOuts.res_retrans[RES_TO_DEFAULT];
-#endif /* NAMED_BIND */
+#endif
 
 	/*
 	**  Find our real host name for future logging.
@@ -1964,11 +1972,11 @@ main(argc, argv, envp)
 #if SASL
 	/* sendmail specific SASL initialization */
 	sm_sasl_init();
-#endif /* SASL */
+#endif
 
 #if XDEBUG
 	checkfd012("before main() initmaps");
-#endif /* XDEBUG */
+#endif
 
 	/*
 	**  Do operation-mode-dependent initialization.
@@ -1983,8 +1991,6 @@ main(argc, argv, envp)
 		(void) sm_signal(SIGPIPE, sigpipe);
 		if (qgrp != NOQGRP)
 		{
-			int j;
-
 			/* Selecting a particular queue group to run */
 			for (j = 0; j < Queue[qgrp]->qg_numqueues; j++)
 			{
@@ -2164,13 +2170,15 @@ main(argc, argv, envp)
 	if (tls_ok)
 	{
 		/* basic TLS initialization */
-		tls_ok = init_tls_library(FipsMode);
-		if (!tls_ok && FipsMode)
+		j = init_tls_library(FipsMode);
+		if (j < 0)
 		{
 			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
-				     "ERROR: FIPSMode failed to initialize\n");
+				     "ERROR: TLS failed to initialize\n");
 			exit(EX_USAGE);
 		}
+		if (j > 0)
+			tls_ok = false;
 	}
 
 	if (!tls_ok && (OpMode == MD_QUEUERUN || OpMode == MD_DELIVER))
@@ -2191,7 +2199,7 @@ main(argc, argv, envp)
 #if STARTTLS
 		/* init TLS for client, ignore result for now */
 		(void) initclttls(tls_ok);
-#endif /* STARTTLS */
+#endif
 
 		/*
 		**  The parent process of the caller of runqueue() needs
@@ -2382,7 +2390,7 @@ main(argc, argv, envp)
 			  "starting daemon (%s): %s", Version, dtype + 1);
 #if XLA
 		xla_create_file();
-#endif /* XLA */
+#endif
 
 		/* save daemon type in a macro for possible PidFile use */
 		macdefine(&BlankEnvelope.e_macro, A_TEMP,
@@ -2562,7 +2570,7 @@ main(argc, argv, envp)
 #if STARTTLS
 		/* init TLS for server, ignore result for now */
 		(void) initsrvtls(tls_ok);
-#endif /* STARTTLS */
+#endif
 
 	nextreq:
 		p_flags = getrequests(&MainEnvelope);
@@ -2623,8 +2631,19 @@ main(argc, argv, envp)
 
 	if (LogLevel > 9)
 	{
+		p = authinfo;
+		if (NULL == p)
+		{
+			if (NULL != RealHostName)
+				p = RealHostName;
+			else
+				p = anynet_ntoa(&RealHostAddr);
+			if (NULL == p)
+				p = "unknown";
+		}
+
 		/* log connection information */
-		sm_syslog(LOG_INFO, NULL, "connect from %s", authinfo);
+		sm_syslog(LOG_INFO, NULL, "connect from %s", p);
 	}
 
 	/*
@@ -2704,7 +2723,7 @@ main(argc, argv, envp)
 #if STARTTLS
 		if (OpMode == MD_SMTP)
 			(void) initsrvtls(tls_ok);
-#endif /* STARTTLS */
+#endif
 
 		/* turn off profiling */
 		SM_PROF(1);
@@ -2748,7 +2767,7 @@ main(argc, argv, envp)
 			     RealUserName, from, warn_f_flag);
 #if SASL
 		auth = false;
-#endif /* SASL */
+#endif
 	}
 	if (auth)
 	{
@@ -2927,7 +2946,7 @@ main(argc, argv, envp)
 #if NAMED_BIND
 		_res.retry = TimeOuts.res_retry[RES_TO_FIRST];
 		_res.retrans = TimeOuts.res_retrans[RES_TO_FIRST];
-#endif /* NAMED_BIND */
+#endif
 		next = e->e_sibling;
 		e->e_sibling = NULL;
 
@@ -2994,6 +3013,17 @@ finis(drop, cleanup, exitstat)
 	sm_clear_events();
 	(void) sm_releasesignal(SIGALRM);
 
+#if RATECTL_DEBUG || _FFR_OCC
+	/* do this only in "main" process */
+	if (DaemonPid == getpid())
+	{
+		SM_FILE_T *fp;
+
+		fp = sm_debug_file();
+		if (fp != NULL)
+			dump_ch(fp);
+	}
+#endif
 	if (tTd(2, 1))
 	{
 		sm_dprintf("\n====finis: stat %d e_id=%s e_flags=",
@@ -3046,16 +3076,16 @@ finis(drop, cleanup, exitstat)
 #if USERDB
 		/* close UserDatabase */
 		_udbx_close();
-#endif /* USERDB */
+#endif
 
 #if SASL
 		stop_sasl_client();
-#endif /* SASL */
+#endif
 
 #if XLA
 		/* clean up extended load average stuff */
 		xla_all_end();
-#endif /* XLA */
+#endif
 
 	SM_FINALLY
 		/*
@@ -3074,7 +3104,7 @@ finis(drop, cleanup, exitstat)
 		pid = getpid();
 #if SM_CONF_SHM
 		cleanup_shm(DaemonPid == pid);
-#endif /* SM_CONF_SHM */
+#endif
 
 		/* close locked pid file */
 		close_sendmail_pid();
@@ -3091,14 +3121,14 @@ finis(drop, cleanup, exitstat)
 		sm_mbdb_terminate();
 #if _FFR_MEMSTAT
 		(void) sm_memstat_close();
-#endif /* _FFR_MEMSTAT */
+#endif
 		(void) setuid(RealUid);
 #if SM_HEAP_CHECK
 		/* dump the heap, if we are checking for memory leaks */
 		if (sm_debug_active(&SmHeapCheck, 2))
 			sm_heap_report(smioout,
 				       sm_debug_level(&SmHeapCheck) - 1);
-#endif /* SM_HEAP_CHECK */
+#endif
 		if (sm_debug_active(&SmXtrapReport, 1))
 			sm_dprintf("xtrap count = %d\n", SmXtrapCount);
 		if (cleanup)
@@ -3422,7 +3452,7 @@ disconnect(droplev, e)
 
 #if XDEBUG
 	checkfd012("disconnect");
-#endif /* XDEBUG */
+#endif
 
 	if (LogLevel > 71)
 		sm_syslog(LOG_DEBUG, e->e_id, "in background, pid=%d",
@@ -3460,7 +3490,7 @@ obsolete(argv)
 		    ap[1] != 'd' &&
 #if defined(sony_news)
 		    ap[1] != 'E' && ap[1] != 'J' &&
-#endif /* defined(sony_news) */
+#endif
 		    argv[1] != NULL && argv[1][0] != '-')
 		{
 			argv++;
@@ -3711,7 +3741,7 @@ sigusr1(sig)
 	dumpstate("user signal");
 # if SM_HEAP_CHECK
 	dumpstab();
-# endif /* SM_HEAP_CHECK */
+# endif
 	errno = save_errno;
 	return SIGFUNC_RETURN;
 }
@@ -4322,7 +4352,7 @@ testmodeline(line, e)
 						     "Usage: /mx address\n");
 				return;
 			}
-			nmx = getmxrr(p, mxhosts, NULL, false, &rcode, true,
+			nmx = getmxrr(p, mxhosts, NULL, TRYFALLBACK, &rcode,
 				      NULL);
 			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
 					     "getmxrr(%s) returns %d value(s):\n",

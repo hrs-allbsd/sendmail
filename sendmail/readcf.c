@@ -13,6 +13,12 @@
 
 #include <sendmail.h>
 #include <sm/sendmail.h>
+#if STARTTLS
+# include <tls.h>
+#endif
+#if DNSSEC_TEST
+# include <sm_resolve.h>
+#endif
 
 SM_RCSID("@(#)$Id: readcf.c,v 8.692 2013-11-22 20:51:56 ca Exp $")
 
@@ -440,7 +446,7 @@ readcf(cfname, safe, e)
 						nexttoken = ap[1][0] & 0377;
 						if (nexttoken == CANONHOST ||
 						    nexttoken == CANONUSER ||
-						    nexttoken == endtoken))
+						    nexttoken == endtoken)
 						{
 							syserr("missing map name for lookup");
 							break;
@@ -450,7 +456,7 @@ readcf(cfname, safe, e)
 							syserr("syntax error in map lookup");
 							break;
 						}
-						if (ap[0][0] == HOSTBEGIN)
+						if ((unsigned char) ap[0][0] == HOSTBEGIN)
 							break;
 						nexttoken = ap[2][0] & 0377;
 						if (nexttoken == CANONHOST ||
@@ -1242,7 +1248,7 @@ static char frst[MAXMAILERS + 1];
 **
 **	Returns:
 **		none
-**	
+**
 **	Note: space is not valid in cf defined mailers hence the function
 **		will always find a char. It's not nice, but this is for
 **		internal names only.
@@ -2205,6 +2211,9 @@ static struct ssl_options
 #ifdef SSL_OP_NO_TLSv1
 	{ "SSL_OP_NO_TLSv1",	SSL_OP_NO_TLSv1	},
 #endif
+#ifdef SSL_OP_NO_TLSv1_3
+	{ "SSL_OP_NO_TLSv1_3",	SSL_OP_NO_TLSv1_3	},
+#endif
 #ifdef SSL_OP_NO_TLSv1_2
 	{ "SSL_OP_NO_TLSv1_2",	SSL_OP_NO_TLSv1_2	},
 #endif
@@ -2229,6 +2238,24 @@ static struct ssl_options
 #ifdef SSL_OP_TLSEXT_PADDING
 	{ "SSL_OP_TLSEXT_PADDING",	SSL_OP_TLSEXT_PADDING	},
 #endif
+#ifdef SSL_OP_NO_RENEGOTIATION
+	{ "SSL_OP_NO_RENEGOTIATION",    SSL_OP_NO_RENEGOTIATION },
+#endif
+#ifdef SSL_OP_NO_ANTI_REPLAY
+	{ "SSL_OP_NO_ANTI_REPLAY",	SSL_OP_NO_ANTI_REPLAY },
+#endif 
+#ifdef SSL_OP_ALLOW_NO_DHE_KEX
+	{ "SSL_OP_ALLOW_NO_DHE_KEX",	SSL_OP_ALLOW_NO_DHE_KEX },
+#endif 
+#ifdef SSL_OP_NO_ENCRYPT_THEN_MAC
+	{ "SSL_OP_NO_ENCRYPT_THEN_MAC",	SSL_OP_NO_ENCRYPT_THEN_MAC },
+#endif 
+#ifdef SSL_OP_ENABLE_MIDDLEBOX_COMPAT
+	{ "SSL_OP_ENABLE_MIDDLEBOX_COMPAT",	SSL_OP_ENABLE_MIDDLEBOX_COMPAT },
+#endif 
+#ifdef SSL_OP_PRIORITIZE_CHACHA
+	{ "SSL_OP_PRIORITIZE_CHACHA",	SSL_OP_PRIORITIZE_CHACHA },
+#endif 
 	{ NULL,		0		}
 };
 
@@ -2248,6 +2275,8 @@ static struct ssl_options
 #define SSLOPERR_NAN	1
 #define SSLOPERR_NOTFOUND	2
 #define SM_ISSPACE(c)	(isascii(c) && isspace(c))
+
+static int readssloptions __P((char *, char *, unsigned long *, int ));
 
 static int
 readssloptions(opt, val, pssloptions, delim)
@@ -2328,13 +2357,13 @@ readssloptions(opt, val, pssloptions, delim)
 	return ret;
 }
 
-# if _FFR_TLS_SE_OPTS
 /*
 ** GET_TLS_SE_OPTIONS -- get TLS session options (from ruleset)
 **
 **	Parameters:
 **		e -- envelope
 **		ssl -- TLS session context
+**		tlsi_ctx -- TLS info context
 **		srv -- server?
 **
 **	Returns:
@@ -2342,9 +2371,10 @@ readssloptions(opt, val, pssloptions, delim)
 */
 
 int
-get_tls_se_options(e, ssl, srv)
+get_tls_se_options(e, ssl, tlsi_ctx, srv)
 	ENVELOPE *e;
 	SSL *ssl;
+	tlsi_ctx_T *tlsi_ctx;
 	bool srv;
 {
 	bool saveQuickAbort, saveSuprErrs, ok;
@@ -2390,7 +2420,7 @@ get_tls_se_options(e, ssl, srv)
 		if (LogLevel > 9)
 			sm_syslog(LOG_INFO, NOQID,
 				  "tls_%s_features=empty, relay=%s [%s]",
-			  	  WHICH, NAME_C_S, ADDR_C_S);
+				  WHICH, NAME_C_S, ADDR_C_S);
 
 		return ok ? 0 : 1;
 	}
@@ -2405,7 +2435,7 @@ get_tls_se_options(e, ssl, srv)
 			if (LogLevel > 9 && len > 1)
 				sm_syslog(LOG_INFO, NOQID,
 				  "tls_%s_features=too_short, relay=%s [%s]",
-			  	  WHICH, NAME_C_S, ADDR_C_S);
+				  WHICH, NAME_C_S, ADDR_C_S);
 
 			/* this is not treated as error! */
 			return 0;
@@ -2418,7 +2448,7 @@ get_tls_se_options(e, ssl, srv)
 		if (LogLevel > 7)	\
 			sm_syslog(LOG_INFO, NOQID,	\
 				  "tls_%s_features=invalid_syntax, opt=%s, relay=%s [%s]",	\
-		  		  WHICH, opt, NAME_C_S, ADDR_C_S);	\
+				  WHICH, opt, NAME_C_S, ADDR_C_S);	\
 		return -1;	\
 	} while (0)
 
@@ -2499,9 +2529,18 @@ get_tls_se_options(e, ssl, srv)
 						  "STARTTLS=%s, error: SSL_set_cipher_list(%s) failed",
 						  who, val);
 
-					if (LogLevel > 9)
-						tlslogerr(LOG_WARNING, who);
+					tlslogerr(LOG_WARNING, 9, who);
 				}
+			}
+		}
+		else if (sm_strcasecmp(opt, "flags") == 0)
+		{
+			char *p;
+
+			for (p = val; *p != '\0'; p++)
+			{
+				if (isascii(*p) && isalnum(*p))
+					setbitn(bitidx(*p), tlsi_ctx->tlsi_flags);
 			}
 		}
 		else if (sm_strcasecmp(opt, "keyfile") == 0)
@@ -2515,7 +2554,7 @@ get_tls_se_options(e, ssl, srv)
 			{
 				sm_syslog(LOG_INFO, NOQID,
 					  "tls_%s_features=unknown_option, opt=%s, relay=%s [%s]",
-				  	  WHICH, opt, NAME_C_S, ADDR_C_S);
+					  WHICH, opt, NAME_C_S, ADDR_C_S);
 			}
 		}
 
@@ -2535,7 +2574,7 @@ get_tls_se_options(e, ssl, srv)
 		{
 			sm_syslog(LOG_INFO, NOQID,
 				  "tls_%s_features=only_one_of_CertFile/KeyFile_specified, relay=%s [%s]",
-			  	  WHICH, NAME_C_S, ADDR_C_S);
+				  WHICH, NAME_C_S, ADDR_C_S);
 		}
 	}
 
@@ -2545,7 +2584,6 @@ get_tls_se_options(e, ssl, srv)
 #  undef ADDR_C_S
 #  undef WHICH
 }
-# endif /* _FFR_TLS_SE_OPTS */
 #endif /* STARTTLS */
 
 /*
@@ -2589,7 +2627,13 @@ static struct resolverflags
 	{ "dnsrch",	RES_DNSRCH	},
 # ifdef RES_USE_INET6
 	{ "use_inet6",	RES_USE_INET6	},
-# endif /* RES_USE_INET6 */
+# endif
+# ifdef RES_USE_EDNS0
+	{ "use_edns0",	RES_USE_EDNS0	},
+# endif
+# ifdef RES_USE_DNSSEC
+	{ "use_dnssec",	RES_USE_DNSSEC	},
+# endif
 	{ "true",	0		},	/* avoid error on old syntax */
 	{ NULL,		0		}
 };
@@ -2837,10 +2881,8 @@ static struct optioninfo
 	{ "FallbackSmartHost",		O_FALLBACKSMARTHOST,	OI_NONE	},
 #define O_SASLREALM	0xd6
 	{ "AuthRealm",		O_SASLREALM,	OI_NONE	},
-#if _FFR_CRLPATH
-# define O_CRLPATH	0xd7
+#define O_CRLPATH	0xd7
 	{ "CRLPath",		O_CRLPATH,	OI_NONE	},
-#endif /* _FFR_CRLPATH */
 #define O_HELONAME 0xd8
 	{ "HeloName",   O_HELONAME,     OI_NONE },
 #if _FFR_MEMSTAT
@@ -2910,6 +2952,41 @@ static struct optioninfo
 #endif
 #define O_USECOMPRESSEDIPV6ADDRESSES 0xec
 	{ "UseCompressedIPv6Addresses",	O_USECOMPRESSEDIPV6ADDRESSES, OI_NONE },
+#if STARTTLS
+# define O_SSLENGINE	0xed
+	{ "SSLEngine",		O_SSLENGINE,	OI_NONE	},
+# define O_SSLENGINEPATH	0xee
+	{ "SSLEnginePath",	O_SSLENGINEPATH,	OI_NONE	},
+# define O_TLSFB2CLEAR		0xef
+	{ "TLSFallbacktoClear",	O_TLSFB2CLEAR,	OI_NONE	},
+#endif
+#if DNSSEC_TEST
+# define O_NSPORTIP		0xf0
+	{ "NameServer",	O_NSPORTIP,	OI_NONE	},
+#endif
+#if _FFR_TLSA_DANE
+# define O_DANE		0xf1
+	{ "DANE",	O_DANE,	OI_NONE	},
+#endif
+#if DNSSEC_TEST
+# define O_NSSRCHLIST		0xf2
+	{ "NameSearchList",	O_NSSRCHLIST,	OI_NONE	},
+#endif
+#if _FFR_BLANKENV_MACV
+# define O_HACKS	0xf4
+	{ "Hacks",		O_HACKS,	OI_NONE	},
+#endif
+#if _FFR_KEEPBCC
+# define O_KEEPBCC	0xf3
+	{ "KeepBcc",		O_KEEPBCC,	OI_NONE	},
+#endif
+
+#if _FFR_CLIENTCA
+#define O_CLTCACERTFILE	0xf5
+	{ "ClientCACertFile",			O_CLTCACERTFILE, OI_NONE },
+#define O_CLTCACERTPATH	0xf6
+	{ "ClientCACertPath",			O_CLTCACERTPATH, OI_NONE },
+#endif
 
 	{ NULL,				'\0',		OI_NONE	}
 };
@@ -3197,7 +3274,7 @@ setoption(opt, val, safe, sticky, e)
 #if _FFR_DM_ONE
 		/* deliver first TA in background, then queue */
 		  case SM_DM_ONE:
-#endif /* _FFR_DM_ONE */
+#endif
 			set_delivery_mode(*val, e);
 			break;
 
@@ -4233,6 +4310,9 @@ setoption(opt, val, safe, sticky, e)
 #endif /* SASL */
 
 #if STARTTLS
+	  case O_TLSFB2CLEAR:
+		TLSFallbacktoClear = atobool(val);
+		break;
 	  case O_SRVCERTFILE:
 		SET_STRING_EXP(SrvCertFile);
 	  case O_SRVKEYFILE:
@@ -4245,12 +4325,34 @@ setoption(opt, val, safe, sticky, e)
 		SET_STRING_EXP(CACertFile);
 	  case O_CACERTPATH:
 		SET_STRING_EXP(CACertPath);
+#if _FFR_CLIENTCA
+	  case O_CLTCACERTFILE:
+		SET_STRING_EXP(CltCACertFile);
+	  case O_CLTCACERTPATH:
+		SET_STRING_EXP(CltCACertPath);
+#endif
 	  case O_DHPARAMS:
 		SET_STRING_EXP(DHParams);
 	  case O_CIPHERLIST:
 		SET_STRING_EXP(CipherList);
 	  case O_DIG_ALG:
 		SET_STRING_EXP(CertFingerprintAlgorithm);
+	  case O_SSLENGINEPATH:
+		SET_STRING_EXP(SSLEnginePath);
+	  case O_SSLENGINE:
+		newval = sm_pstrdup_x(val);
+		if (SSLEngine != NULL)
+			sm_free(SSLEngine);
+		SSLEngine = newval;
+
+		/*
+		**  Which engines need to be initialized before fork()?
+		**  XXX hack, should be an option?
+		*/
+
+		if (strcmp(SSLEngine, "chil") == 0)
+			SSLEngineprefork = true;
+		break;
 	  case O_SRV_SSL_OPTIONS:
 		pssloptions = &Srv_SSL_Options;
 	  case O_CLT_SSL_OPTIONS:
@@ -4264,26 +4366,12 @@ setoption(opt, val, safe, sticky, e)
 		break;
 
 	  case O_CRLFILE:
-# if OPENSSL_VERSION_NUMBER > 0x00907000L
 		SET_STRING_EXP(CRLFile);
-# else /* OPENSSL_VERSION_NUMBER > 0x00907000L */
-		(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
-				     "Warning: Option: %s requires at least OpenSSL 0.9.7\n",
-				     OPTNAME);
 		break;
-# endif /* OPENSSL_VERSION_NUMBER > 0x00907000L */
 
-# if _FFR_CRLPATH
 	  case O_CRLPATH:
-#  if OPENSSL_VERSION_NUMBER > 0x00907000L
 		SET_STRING_EXP(CRLPath);
-#  else /* OPENSSL_VERSION_NUMBER > 0x00907000L */
-		(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
-				     "Warning: Option: %s requires at least OpenSSL 0.9.7\n",
-				     OPTNAME);
 		break;
-#  endif /* OPENSSL_VERSION_NUMBER > 0x00907000L */
-# endif /* _FFR_CRLPATH */
 
 	/*
 	**  XXX How about options per daemon/client instead of globally?
@@ -4345,14 +4433,17 @@ setoption(opt, val, safe, sticky, e)
 	  case O_CLTKEYFILE:
 	  case O_CACERTFILE:
 	  case O_CACERTPATH:
+#if _FFR_CLIENTCA
+	  case O_CLTCACERTFILE:
+	  case O_CLTCACERTPATH:
+#endif
 	  case O_DHPARAMS:
 	  case O_SRV_SSL_OPTIONS:
 	  case O_CLT_SSL_OPTIONS:
 	  case O_CIPHERLIST:
+	  case O_DIG_ALG:
 	  case O_CRLFILE:
-# if _FFR_CRLPATH
 	  case O_CRLPATH:
-# endif /* _FFR_CRLPATH */
 	  case O_RANDFILE:
 		(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
 				     "Warning: Option: %s requires TLS support\n",
@@ -4539,6 +4630,36 @@ setoption(opt, val, safe, sticky, e)
 	  case O_USECOMPRESSEDIPV6ADDRESSES:
 		UseCompressedIPv6Addresses = atobool(val);
 		break;
+
+#if DNSSEC_TEST
+	  case O_NSPORTIP:
+		nsportip(val);
+		break;
+	  case O_NSSRCHLIST:
+		NameSearchList = sm_strdup(val);
+		break;
+#endif
+
+#if _FFR_TLSA_DANE
+	  case O_DANE:
+		if (sm_strcasecmp(val, "always") == 0)
+			Dane = DANE_ALWAYS;
+		else
+			Dane = atobool(val) ? DANE_SECURE : DANE_NEVER;
+		break;
+#endif
+
+#if _FFR_BLANKENV_MACV
+	  case O_HACKS:
+		Hacks = (int) strtol(val, NULL, 0);
+		break;
+#endif
+
+#if _FFR_KEEPBCC
+	  case O_KEEPBCC:
+		KeepBcc = atobool(val);
+		break;
+#endif
 
 	  default:
 		if (tTd(37, 1))

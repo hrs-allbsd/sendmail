@@ -67,6 +67,8 @@ this filter.</TD>
 <UL>
     <LI>The rcode or xcode argument is invalid.
     <LI>A memory-allocation failure occurs.
+    <LI>The length of any text line is more than MAXREPLYLEN (980).
+    <LI>The message argument contains a carriage return or line feed.
 </UL>
 Otherwise, it return MI_SUCCESS.
 </TD>

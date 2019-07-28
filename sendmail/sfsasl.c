@@ -66,7 +66,7 @@ sasl_getinfo(fp, what, valp)
 	  case SM_IO_WHAT_FD:
 		if (so->fp == NULL)
 			return -1;
-		return so->fp->f_file; /* for stdio fileno() compatability */
+		return so->fp->f_file; /* for stdio fileno() compatibility */
 
 	  case SM_IO_IS_READABLE:
 		if (so->fp == NULL)
@@ -299,7 +299,7 @@ sasl_write(fp, buf, size)
 	**  This can be less than the size set in attemptauth()
 	**  due to a negotiation with the other side, e.g.,
 	**  Cyrus IMAP lmtp program sets maxbuf=4096,
-	**  digestmd5 substracts 25 and hence we'll get 4071
+	**  digestmd5 subtracts 25 and hence we'll get 4071
 	**  instead of 8192 (MAXOUTLEN).
 	**  Hack (for now): simply reduce the size, callers are (must be)
 	**  able to deal with that and invoke sasl_write() again with
@@ -416,6 +416,7 @@ sfdcsasl(fin, fout, conn, tmo)
 
 #if STARTTLS
 # include "sfsasl.h"
+# include <tls.h>
 # include <openssl/err.h>
 
 /* Structure used by the "tls" file type */
@@ -461,7 +462,7 @@ tls_getinfo(fp, what, valp)
 	  case SM_IO_WHAT_FD:
 		if (so->fp == NULL)
 			return -1;
-		return so->fp->f_file; /* for stdio fileno() compatability */
+		return so->fp->f_file; /* for stdio fileno() compatibility */
 
 	  case SM_IO_IS_READABLE:
 		return SSL_pending(so->con) > 0;
@@ -627,8 +628,7 @@ tls_retry(ssl, rfd, wfd, tlsstart, timeout, err, where)
 			sm_syslog(LOG_ERR, NOQID,
 				  "STARTTLS=%s, error: fd %d/%d too large",
 				  where, rfd, wfd);
-			if (LogLevel > 8)
-				tlslogerr(LOG_WARNING, where);
+			tlslogerr(LOG_WARNING, 8, where);
 		}
 		errno = EINVAL;
 	}
@@ -787,7 +787,7 @@ tls_read(fp, buf, size)
 				pri = LOG_DEBUG;
 			else
 				pri = LOG_WARNING;
-			tlslogerr(pri, "read");
+			tlslogerr(pri, 9, "read");
 		}
 
 #if DEAL_WITH_ERROR_SSL
@@ -902,8 +902,7 @@ tls_write(fp, buf, size)
 /*
 		ERR_GET_REASON(ERR_peek_error()));
 */
-		if (LogLevel > 9)
-			tlslogerr(LOG_WARNING, "write");
+		tlslogerr(LOG_WARNING, 9, "write");
 
 #if DEAL_WITH_ERROR_SSL
 		/* avoid repeated calls? */

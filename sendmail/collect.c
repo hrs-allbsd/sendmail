@@ -435,11 +435,9 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 				break;
 
 			  case IS_DOT:
-				if (c == '\n' && !ignrdot &&
-				    !bitset(EF_NL_NOT_EOL, e->e_flags))
+				if (c == '\n' && !ignrdot)
 					goto readerr;
-				else if (c == '\r' &&
-					 !bitset(EF_CRLF_NOT_EOL, e->e_flags))
+				else if (c == '\r')
 				{
 					istate = IS_DOTCR;
 					continue;
@@ -494,13 +492,12 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 				goto bufferchar;
 			}
 
-			if (c == '\r' && !bitset(EF_CRLF_NOT_EOL, e->e_flags))
+			if (c == '\r')
 			{
 				istate = IS_CR;
 				continue;
 			}
-			else if (c == '\n' && !bitset(EF_NL_NOT_EOL,
-						      e->e_flags))
+			else if (c == '\n')
 				istate = IS_BOL;
 			else
 				istate = IS_NORM;
@@ -683,10 +680,8 @@ nextstate:
 			bp = buf;
 
 			/* toss blank line */
-			if ((!bitset(EF_CRLF_NOT_EOL, e->e_flags) &&
-				bp[0] == '\r' && bp[1] == '\n') ||
-			    (!bitset(EF_NL_NOT_EOL, e->e_flags) &&
-				bp[0] == '\n'))
+			if ((bp[0] == '\r' && bp[1] == '\n') ||
+			    (bp[0] == '\n'))
 			{
 				break;
 			}

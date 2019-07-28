@@ -5,6 +5,100 @@ This listing shows the version of the sendmail binary, the version
 of the sendmail configuration files, the date of release, and a
 summary of the changes in that release.
 
+8.16.1/8.16.1	201X/XX/XX
+	SECURITY: If sendmail tried to reuse an SMTP session which had
+		already been closed by the server, then the connection
+		cache could have invalid information about the session.
+		One possible consequence was that STARTTLS was not
+		used even if offered.  This problem has been fixed
+		by clearing out all relevant status information
+		when a closed session is encountered.
+	OpenSSL versions before 0.9.8 are no longer supported.
+	OpenSSL version 1.1.0 and 1.1.1 are supported.
+	New options SSLEngine and SSLEnginePath to support OpenSSL engines.
+		Note: this feature has so far only been tested with the
+		"chil" engine; please report problems with other engines
+		if you encounter any.
+	New option CRLPath to specify a directory which contains
+		hashes pointing to certificate revocations files.
+		Based on patch from Al Smith.
+	New rulesets tls_srv_features and tls_clt_features which
+		can return a (semicolon separated) list of TLS related
+		options, e.g., CipherList, CertFile, KeyFile,
+		see doc/op/op.me for details.
+	To automatically handle TLS interoperability problems for outgoing
+		mail, sendmail can now immediately try a connection again
+		without STARTTLS after a TLS handshake failure.
+		This can be configured globally via the option
+		TLSFallbacktoClear or per session via the 'C' flag
+		of tls_clt_features.
+		This also adds the new value "CLEAR" for the macro
+		{verify}: STARTTLS has been disabled internally for
+		a clear text delivery attempt.
+	Apply Timeout.starttls also to the server waiting for the TLS
+		handshake to begin.  Based on patch from Simon Hradecky.
+	New compile time option TLS_EC to enable the use of elliptic
+		curve cryptography in STARTTLS (previously available as
+		_FFR_TLS_EC).
+	Handle MIME boundaries specified in headers which contain CRLF.
+	Fix detection of loopback net (it was broken when compiled
+		with NETINET6) and only set the macros {if_addr_out}
+		and {if_family_out} if the interface of the outgoing
+		connection does not belong to the loopback net.
+	Fix logic to enable a milter to delete a recipient in
+		DeliveryMode=interactive even if it might be subject
+		to alias expansion.
+	Add CDB as map type. Note: CDB is a "Constant DataBase", i.e.,
+		no changes can be made after it is created, hence it
+		does not work with vacation(1) nor editmap(8) (except
+		for query mode).
+	Fix some memory leaks (mostly in error cases) and properly handle
+		copied varargs in sm_io_vfprintf(). The issues were found
+		using Coverity Scan and reported (including patches) by
+		Ondřej Lysoněk of Red Hat.
+	CONFIG: New FEATURE(`tls_session_features') to enable standard
+		rules for tls_srv_features and tls_clt_features; for
+		details see cf/README.
+	CONFIG: New options confSSL_ENGINE and confSSL_ENGINE_PATH
+		for SSLEngine and SSLEnginePath, respectively.
+	CONFIG: New option confTLS_FALLBACK_TO_CLEAR for TLSFallbacktoClear.
+	CONFIG: New FEATURE(`tls_failures') allows downgrading SMTP
+		deliveries from TLS to cleartext sessions after several
+		tries if the previous delivery failed with a PROTOCOL
+		or SOFTWARE TLS error.
+	CONFIG: New extension CITag: for TLS restrictions, see cf/README
+		for details.
+	CONTRIB: cidrexpand updated to support IPv6 CIDR ranges and to
+		canonicalize IPv6 addresses; if cidrexpand is used with IPv6
+		addresses then UseCompressedIPv6Addresses must be disabled.
+	DOC: The dns map can return multiple values in a single result
+		if the -z option is used.
+	DOC: Note to set MustQuoteChars=. due to DKIM signatures.
+	LIBMILTER: Fix typo in a macro. Patch from Ignacio Goyret
+		of Alcatel-Lucent.
+	LIBMILTER: Fix reference in xxfi_negotiate documentation.
+		Patch from Sven Neuhaus.
+	LIBMILTER: Fix function name in smfi_addrcpt_par documentation.
+		Patch from G.W. Haywood.
+	MAKEMAP: New map type "implicit" refers to the first available type,
+		i.e., it depends on the compile time options NEWDB, DBM,
+		and CDB. This can be used in conjunction with the
+		"implicit" map type in sendmail.cf.
+		Note: makemap, libsmdb, and sendmail must be compiled
+		with the same options (and library versions of course).
+	Portability:
+		Add support for Darwin 14-16 (Mac OS X 10.10-12).
+	Added Files:
+		cf/feature/tls_failures.m4
+		devtools/OS/Darwin.14.x
+		devtools/OS/Darwin.15.x
+		devtools/OS/Darwin.16.x
+		libsmdb/smcdb.c
+		sendmail/ratectrl.h
+	Portability:
+		Set SM_CONF_SEM=2 for FreeBSD 12 and later due to
+		changes in sys/sem.h
+
 8.15.2/8.15.2	2015/07/03
 	If FEATURE(`nopercenthack') is used then some bogus input triggered
 		a recursion which was caught and logged as
@@ -104,7 +198,7 @@ summary of the changes in that release.
 	The option CipherList sets the list of ciphers for STARTTLS.
 		See ciphers(1) for possible values.
 	Do not log "STARTTLS: internal error: tls_verify_cb: ssl == NULL"
-		if a CRLFfile is in use (and LogLevel is 14 or higher.)
+		if a CRLFile is in use (and LogLevel is 14 or higher.)
 	Store a more specific TLS protocol version in ${tls_version}
 		instead of a generic one, e.g., TLSv1 instead of
 		TLSv1/SSLv3.
@@ -127,7 +221,7 @@ summary of the changes in that release.
 	A new map type "arpa" is available to reverse an IP (IPv4 or IPv6)
 		address. It returns the string for the PTR lookup, but
 		without trailing {ip6,in-addr}.arpa.
-	New operation mode  'C' just checks the configuration file, e.g.,
+	New operation mode 'C' just checks the configuration file, e.g.,
 		sendmail -C new.cf -bC
 		will perform a basic syntax/consistency check of new.cf.
 	The mailer flag 'I' is deprecated and will be removed in a
@@ -740,7 +834,7 @@ summary of the changes in that release.
 		Patches from Nelson Fung.
 	CONTRIB: cidrexpand uses a hash symbol as comment character and
 		ignores everything after it unless it is in quotes or
-		preceeded by a backslash.
+		preceded by a backslash.
 	DEVTOOLS: New macro confMKDIR: if set to a program that creates
 		directories, then it used for "make install" to create
 		the required installation directories.
@@ -2539,7 +2633,7 @@ summary of the changes in that release.
 		is "pw", which means to use getpwnam().  New mailbox database
 		types can be added by adding custom code to libsm/mbdb.c.
 	Queue file names are now 15 characters long, rather than 14 characters
-		long, to accomodate envelope splitting.  File systems with
+		long, to accommodate envelope splitting.  File systems with
 		a 14 character file name length limit are no longer
 		supported.
 	Recipient list used for delivery now gets internally ordered by
@@ -2580,7 +2674,7 @@ summary of the changes in that release.
 	New ruleset srv_features to enable/disable certain features in the
 		server per connection.  See doc/op/op.me for details.
 	New ruleset tls_rcpt to decide whether to send e-mail to a particular
-		recipient; useful to decide whether a conection is secure
+		recipient; useful to decide whether a connection is secure
 		enough on a per recipient basis.
 	New option TLSSrvOptions to modify some aspects of the server
 		for STARTTLS.
@@ -2591,7 +2685,7 @@ summary of the changes in that release.
 	Macro expand filenames/directories for certs and keys in the .cf file.
 		Proposed by Neil Rickert of Northern Illinois University.
 	Generate an ephemeral RSA key for a STARTTLS connection only if
-		really required.  This change results in a noticable
+		really required.  This change results in a noticeable
 		performance gains on most machines.  Moreover, if shared
 		memory is in use, reuse the key several times.
 	Add queue groups which can be used to group queue directories with
@@ -5152,7 +5246,7 @@ summary of the changes in that release.
 		line up into 2046-character output lines (excluding the
 		newline).  If an input line was 2047 characters long
 		(excluding CR-LF) and the last character was a '.',
-		mail.local saw it as the end of input, transfered it to the
+		mail.local saw it as the end of input, transferred it to the
 		user mailbox and tried to write an `ok' back to sendmail.
 		If the message was much longer, both sendmail and
 		mail.local would deadlock waiting for each other to read
@@ -6039,7 +6133,7 @@ summary of the changes in that release.
 	CONFIG: FEATURE(nodns) now warns the user that the feature is a
 		no-op.  Patch from Kari Hurtta of the Finnish
 		Meteorological Institute.
-	CONFIG: OSTYPE(osf1) now sets DefaultUserID (confDEF_USER_ID) to
+	CONFIG: OSTYPE(osf1) now sets DefaultUser (confDEF_USER_ID) to
 		daemon since DEC's /bin/mail will drop the envelope
 		sender if run as mailnull.  See the Digital UNIX section
 		of src/README for more information.  Problem noted by
@@ -7632,7 +7726,7 @@ summary of the changes in that release.
 		instead of 0644.  Suggested by Ann-Kian Yeo of the
 		National University of Singapore.
 	Print errors if setgid/setuid/etc. fail during delivery.  This helps
-		detect cases where DefaultUid is set to something that the
+		detect cases where DefaultUser is set to something that the
 		system can't cope with.
 	PORTABILITY FIXES:
 		Support for AIX/RS 2.2.1 from Mark Whetzel of Western

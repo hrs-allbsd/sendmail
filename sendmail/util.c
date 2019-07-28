@@ -1386,6 +1386,7 @@ sfgets(buf, siz, fp, timeout, during)
 **		buf gets lines from f, with continuation lines (lines
 **		with leading white space) appended.  CRLF's are mapped
 **		into single newlines.  Any trailing NL is stripped.
+**		Increases LineNumber for each line.
 */
 
 char *
@@ -2920,6 +2921,21 @@ xconnect(inchannel)
 		return 0;
 	}
 
+# if _FFR_XCNCT > 1
+	if (pvp != NULL && pvp[0] != NULL &&
+	    pvp[0][0] == '2' && pvp[0][1] == '2' && pvp[0][2] == '0')
+	{
+		char *hostname;			/* my hostname ($j) */
+
+		hostname = macvalue('j', &BlankEnvelope);
+		if (tTd(75, 7))
+			sm_syslog(LOG_INFO, NOQID, "x-connect=%s", pvp[0]);
+		message("220-%s %s", hostname != NULL ? hostname : "xconnect",
+			pvp[1] != NULL ? pvp[1] : "waiting for xconnect");
+		sm_io_flush(OutChannel, SM_TIME_DEFAULT);
+	}
+# endif
+
 	p = sfgets(inp, sizeof(inp), InChannel, TimeOuts.to_nextcommand, "pre");
 	if (tTd(75, 6))
 		sm_syslog(LOG_INFO, NOQID, "x-connect: input=%s", p);
@@ -2960,8 +2976,6 @@ xconnect(inchannel)
 	/* more parameters? */
 	if (delim != ' ')
 		return D_XCNCT;
-	while (*p != '\0' && isascii(*p) && isspace(*p))
-		p++;
 
 	for (b = ++p, i = 0;
 	     *p != '\0' && isascii(*p) && (isalnum(*p) || *p == '.' || *p == '-');

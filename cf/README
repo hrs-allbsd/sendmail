@@ -1603,6 +1603,23 @@ badmx		Reject envelope sender addresses (MAIL) whose domain part
 		has been compiled with the options MAP_REGEX and
 		DNSMAP.
 
+tls_failures	If enabled, the MTA will stop using STARTTLS on outbound
+		connections after a certain number of previous failures
+		with PROTOCOL or SOFTWARE errors. An optional numeric
+		value (default: 5) indicates the number of attempts
+		after which the MTA will give up trying STARTTLS:
+
+		FEATURE(`tls_failures', `8')
+
+		If ${ntries} exceeds the limit and previous delivery
+		failed with a PROTOCOL or SOFTWARE error, the MTA
+		will not use STARTTLS.
+
+		Note: if you enforce TLS for the recipient or
+		destination then it is likely the message will
+		never be delivered as the TLS enforced criterias
+		are unlikely to be ever verified.
+
 +-------+
 | HACKS |
 +-------+
@@ -3071,13 +3088,13 @@ rulesets and map lookups, they are modified as follows: each non-printable
 character and the characters '<', '>', '(', ')', '"', '+', ' ' are replaced
 by their HEX value with a leading '+'.  For example:
 
-/C=US/ST=California/O=endmail.org/OU=private/CN=Darth Mail (Cert)/Email=
+/C=US/ST=California/O=endmail.org/OU=private/CN=Darth Mail (Cert)/emailAddress=
 darth+cert@endmail.org
 
 is encoded as:
 
 /C=US/ST=California/O=endmail.org/OU=private/CN=
-Darth+20Mail+20+28Cert+29/Email=darth+2Bcert@endmail.org
+Darth+20Mail+20+28Cert+29/emailAddress=darth+2Bcert@endmail.org
 
 (line breaks have been inserted for readability).
 
@@ -3089,30 +3106,27 @@ Examples:
 To allow relaying for everyone who can present a cert signed by
 
 /C=US/ST=California/O=endmail.org/OU=private/CN=
-Darth+20Mail+20+28Cert+29/Email=darth+2Bcert@endmail.org
+Darth+20Mail+20+28Cert+29/emailAddress=darth+2Bcert@endmail.org
 
 simply use:
 
 CertIssuer:/C=US/ST=California/O=endmail.org/OU=private/CN=
-Darth+20Mail+20+28Cert+29/Email=darth+2Bcert@endmail.org	RELAY
+Darth+20Mail+20+28Cert+29/emailAddress=darth+2Bcert@endmail.org	RELAY
 
 To allow relaying only for a subset of machines that have a cert signed by
 
 /C=US/ST=California/O=endmail.org/OU=private/CN=
-Darth+20Mail+20+28Cert+29/Email=darth+2Bcert@endmail.org
+Darth+20Mail+20+28Cert+29/emailAddress=darth+2Bcert@endmail.org
 
 use:
 
 CertIssuer:/C=US/ST=California/O=endmail.org/OU=private/CN=
-Darth+20Mail+20+28Cert+29/Email=darth+2Bcert@endmail.org	SUBJECT
+Darth+20Mail+20+28Cert+29/emailAddress=darth+2Bcert@endmail.org	SUBJECT
 CertSubject:/C=US/ST=California/O=endmail.org/OU=private/CN=
-DeathStar/Email=deathstar@endmail.org		RELAY
+DeathStar/emailAddress=deathstar@endmail.org		RELAY
 
-Notes:
-- line breaks have been inserted after "CN=" for readability,
-  each tagged entry must be one (long) line in the access map.
-- if OpenSSL 0.9.7 or newer is used then the "Email=" part of a DN
-  is replaced by "emailAddress=".
+Note: line breaks have been inserted after "CN=" for readability,
+each tagged entry must be one (long) line in the access map.
 
 Of course it is also possible to write a simple ruleset that allows
 relaying for everyone who can present a cert that can be verified, e.g.,
@@ -3188,16 +3202,23 @@ CN:name		name must match ${cn_subject}
 CN		${client_name}/${server_name} must match ${cn_subject}
 CS:name		name must match ${cert_subject}
 CI:name		name must match ${cert_issuer}
+CITag:MYTag	look up MYTag:${cert_issuer} in access map; the check
+		only succeeds if it is found with a RHS of OK.
 
 Example: e-mail sent to secure.example.com should only use an encrypted
 connection.  E-mail received from hosts within the laptop.example.com domain
 should only be accepted if they have been authenticated.  The host which
 receives e-mail for darth@endmail.org must present a cert that uses the
-CN smtp.endmail.org.
+CN smtp.endmail.org.  E-mail sent to safe.example.com must be verified,
+have a matching CN, and must present a cert signed by a CA with one of
+the listed DNs.
 
-TLS_Srv:secure.example.com      ENCR:112
-TLS_Clt:laptop.example.com      PERM+VERIFY:112
+TLS_Srv:secure.example.com	ENCR:112
+TLS_Clt:laptop.example.com	PERM+VERIFY:112
 TLS_Rcpt:darth@endmail.org	ENCR:112+CN:smtp.endmail.org
+TLS_Srv:safe.example.net	VERIFY+CN++CITag:MyCA
+MyCA:/C=US/ST=CA/O=safe/CN=example.net/		OK
+MyCA:/C=US/ST=CA/O=secure/CN=example.net/	OK
 
 
 TLS Options per Session
@@ -3217,6 +3238,7 @@ options:
 - Options: compare {Server,Client}SSLOptions.
 - CipherList: same as the global option.
 - CertFile, KeyFile: {Server,Client}{Cert,Key}File
+- Flags: see doc/op/op.me for details.
 
 If FEATURE(`tls_session_features') is used, then default rulesets
 are activated which look up entries in the access map with the tags
@@ -3234,15 +3256,12 @@ If FEATURE(`tls_session_features') is not used the user can provide
 their own rulesets which must return the appropriate data.
 If the rulesets are not defined or do not return a value, the
 default TLS options are not modified.
-(These rulesets require the sendmail binary to be built with
-_FFR_TLS_SE_OPTS enabled.)
 
-About 2): the ruleset try_tls (srv_features) can be used that work
-together with the access map.  Entries for the access map must be
-tagged with Try_TLS (Srv_Features) and refer to the hostname or IP
-address of the connecting system.  A default case can be specified
-by using just the tag.  For example, the following entries in the
-access map:
+About 2): the ruleset try_tls (srv_features) can be used together
+with the access map.  Entries for the access map must be tagged
+with Try_TLS (Srv_Features) and refer to the hostname or IP address
+of the connecting system.  A default case can be specified by using
+just the tag.  For example, the following entries in the access map:
 
 	Try_TLS:broken.server	NO
 	Srv_Features:my.domain	v
@@ -3654,7 +3673,7 @@ for.  In particular:
   if your system allows "file giveaways" (that is, if a non-root
   user can chown any file they own to any other user).
 
-* If your system allows file giveaways, DO NOT create a publically
+* If your system allows file giveaways, DO NOT create a publicly
   writable directory for forward files.  This will allow anyone
   to steal anyone else's e-mail.  Instead, create a script that
   copies the .forward file from users' home directories once a
@@ -4011,6 +4030,10 @@ confUSERDB_SPEC		UserDatabaseSpec
 confFALLBACK_MX		FallbackMXhost	[undefined] Fallback MX host.
 confFALLBACK_SMARTHOST	FallbackSmartHost
 					[undefined] Fallback smart host.
+confTLS_FALLBACK_TO_CLEAR	TLSFallbacktoClear
+					[undefined] If set, immediately try
+					a connection again without STARTTLS
+					after a TLS handshake failure.
 confTRY_NULL_MX_LIST	TryNullMXList	[False] If this host is the best MX
 					for a host and other arrangements
 					haven't been made, try connecting
@@ -4364,8 +4387,10 @@ confCLIENT_KEY		ClientKeyFile	[undefined] File containing the
 					cert.
 confCRL			CRLFile		[undefined] File containing certificate
 					revocation status, useful for X.509v3
-					authentication. Note that CRL requires
-					at least OpenSSL version 0.9.7.
+					authentication.
+confCRL_PATH		CRLPath		[undefined] Directory containing
+					hashes pointing to certificate
+					revocation status files.
 confDH_PARAMETERS	DHParameters	[undefined] File containing the
 					DH parameters.
 confRAND_FILE		RandFile	[undefined] File containing random
@@ -4379,6 +4404,9 @@ confCERT_FINGERPRINT_ALGORITHM	CertFingerprintAlgorithm
 					[undefined] The fingerprint algorithm
 					(digest) to use for the presented
 					cert.
+confSSL_ENGINE		SSLEngine	[undefined] Name of SSLEngine.
+confSSL_ENGINE_PATH	SSLEnginePath	[undefined] Path to dynamic library
+					for SSLEngine.
 confNICE_QUEUE_RUN	NiceQueueRun	[undefined]  If set, the priority of
 					queue runners is set the given value
 					(nice(3)).
@@ -4802,4 +4830,3 @@ M4 DIVERSIONS
    8	DNS based blacklists
    9	special local rulesets (1 and 2)
 
-$Revision: 8.730 $, Last updated $Date: 2014-01-16 15:55:51 $
