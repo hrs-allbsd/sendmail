@@ -351,6 +351,24 @@ main(argc, argv, envp)
 	/* initialize for setproctitle */
 	initsetproctitle(argc, argv, envp);
 
+#if STARTTLS
+	/* initialize SSL Options before reading sendmail.cf */
+	Srv_SSL_Options = SSL_OP_ALL;
+	Clt_SSL_Options = SSL_OP_ALL
+# ifdef SSL_OP_NO_SSLv2
+		| SSL_OP_NO_SSLv2
+# endif
+# ifdef SSL_OP_NO_TICKET
+		| SSL_OP_NO_TICKET
+# endif
+		;
+# ifdef SSL_OP_TLSEXT_PADDING
+	/* SSL_OP_TLSEXT_PADDING breaks compatibility with some sites */
+	Srv_SSL_Options &= ~SSL_OP_TLSEXT_PADDING;
+	Clt_SSL_Options &= ~SSL_OP_TLSEXT_PADDING;
+# endif /* SSL_OP_TLSEXT_PADDING */
+#endif /* STARTTLS */
+
 	/* Handle any non-getoptable constructions. */
 	obsolete(argv);
 
