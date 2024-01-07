@@ -13,69 +13,74 @@
 
 #include <sendmail.h>
 #include "map.h"
+#if _FFR_EAI
+#include <unicode/uidna.h>
+#endif
 
 #if NAMED_BIND
 SM_RCSID("@(#)$Id: domain.c,v 8.205 2013-11-22 20:51:55 ca Exp $ (with name server)")
-#else /* NAMED_BIND */
+#else
 SM_RCSID("@(#)$Id: domain.c,v 8.205 2013-11-22 20:51:55 ca Exp $ (without name server)")
-#endif /* NAMED_BIND */
+#endif
 
 #if NAMED_BIND
 
 # include <arpa/inet.h>
-# if _FFR_TLSA_DANE || DNSSEC_TEST
-#  include <sm_resolve.h>
-# endif
-# if _FFR_TLSA_DANE
+# include <sm_resolve.h>
+# if DANE
 #  include <tls.h>
+#  ifndef SM_NEG_TTL
+#   define SM_NEG_TTL 60 /* "negative" TTL */
+#  endif
 # endif
 
 
 # ifndef MXHOSTBUFSIZE
 #  define MXHOSTBUFSIZE	(128 * MAXMXHOSTS)
-# endif /* ! MXHOSTBUFSIZE */
+# endif
 
 static char	MXHostBuf[MXHOSTBUFSIZE];
-#if (MXHOSTBUFSIZE < 2) || (MXHOSTBUFSIZE >= INT_MAX/2)
+# if (MXHOSTBUFSIZE < 2) || (MXHOSTBUFSIZE >= INT_MAX/2)
 	ERROR: _MXHOSTBUFSIZE is out of range
-#endif /* (MXHOSTBUFSIZE < 2) || (MXHOSTBUFSIZE >= INT_MAX/2) */
+# endif
 
 # ifndef MAXDNSRCH
 #  define MAXDNSRCH	6	/* number of possible domains to search */
-# endif /* ! MAXDNSRCH */
+# endif
 
 # ifndef RES_DNSRCH_VARIABLE
 #  define RES_DNSRCH_VARIABLE	_res.dnsrch
-# endif /* ! RES_DNSRCH_VARIABLE */
+# endif
 
 # ifndef NO_DATA
 #  define NO_DATA	NO_ADDRESS
-# endif /* ! NO_DATA */
+# endif
 
 # ifndef HFIXEDSZ
 #  define HFIXEDSZ	12	/* sizeof(HEADER) */
-# endif /* ! HFIXEDSZ */
+# endif
 
 # define MAXCNAMEDEPTH	10	/* maximum depth of CNAME recursion */
 
 # if defined(__RES) && (__RES >= 19940415)
 #  define RES_UNC_T	char *
-# else /* defined(__RES) && (__RES >= 19940415) */
+# else
 #  define RES_UNC_T	unsigned char *
-# endif /* defined(__RES) && (__RES >= 19940415) */
+# endif
 
 static int	mxrand __P((char *));
 static int	fallbackmxrr __P((int, unsigned short *, char **));
 
-# if _FFR_TLSA_DANE
+# if DANE
 
 /*
 **  TLSAADD -- add TLSA records to dane_tlsa entry
 **
 **	Parameters:
-**		host -- host (for debugging output)
-**		r -- DNS data
+**		name -- key for stab entry (for debugging output)
+**		dr -- DNS reply
 **		dane_tlsa -- dane_tlsa entry
+**		dnsrc -- DNS lookup return code (h_errno)
 **		n -- current number of TLSA records in dane_tlsa entry
 **		pttl -- (pointer to) TTL (in/out)
 **		level -- recursion level (CNAMEs)
@@ -84,64 +89,71 @@ static int	fallbackmxrr __P((int, unsigned short *, char **));
 **		new number of TLSA records
 */
 
-static int tlsaadd __P((const char *, DNS_REPLY_T *, dane_tlsa_P, int,
+static int tlsaadd __P((const char *, DNS_REPLY_T *, dane_tlsa_P, int, int,
 			unsigned int *, int));
 
 static int
-tlsaadd(host, r, dane_tlsa, n, pttl, level)
-	const char *host;
-	DNS_REPLY_T *r;
+tlsaadd(name, dr, dane_tlsa, dnsrc, n, pttl, level)
+	const char *name;
+	DNS_REPLY_T *dr;
 	dane_tlsa_P dane_tlsa;
+	int dnsrc;
 	int n;
 	unsigned int *pttl;
 	int level;
 {
 	RESOURCE_RECORD_T *rr;
 	unsigned int ttl;
+	int nprev;
 
-	if (r == NULL)
-		return n;
-	if (r->dns_r_h.ad != 1 && Dane == DANE_SECURE)	/* not secure? */
-		return n;
+	if (dnsrc != 0)
+	{
+		if (tTd(8, 2))
+			sm_dprintf("tlsaadd(%s), prev=%d, dnsrc=%d\n",
+				name, dane_tlsa->dane_tlsa_dnsrc, dnsrc);
 
+		/* check previous error and keep the "most important" one? */
+		dane_tlsa->dane_tlsa_dnsrc = dnsrc;
+# if DNSSEC_TEST
+		if (tTd(8, 110))
+			*pttl = tTdlevel(8)-110;	/* how to make this an option? */
+		else
+# else
+			*pttl = SM_NEG_TTL;
+# endif
+
+		return n;
+	}
+	if (dr == NULL)
+		return n;
+	if (dr->dns_r_h.ad != 1 && Dane == DANE_SECURE)	/* not secure? */
+		return n;
 	ttl = *pttl;
-	for (rr = r->dns_r_head; rr != NULL && n < MAX_TLSA_RR;
+
+	/* first: try to find TLSA records */
+	nprev = n;
+	for (rr = dr->dns_r_head; rr != NULL && n < MAX_TLSA_RR;
 	     rr = rr->rr_next)
 	{
-		if (rr->rr_type == T_CNAME && level > 1)
-		{
-			if (tTd(8, 2))
-				sm_dprintf("tlsaadd(%s), CNAME=%s, level=%d\n",
-					host, rr->rr_u.rr_txt, level);
-			break;
-		}
-		if (rr->rr_type == T_CNAME)
-		{
-			DNS_REPLY_T *rc;
-
-
-			rc = dns_lookup_int(rr->rr_u.rr_txt, C_IN, T_TLSA, 0, 0, 0, RR_RAW);
-			if (tTd(8, 2))
-				sm_dprintf("tlsaadd(%s), CNAME=%s, level=%d, r=%p, ad=%d\n",
-					host, rr->rr_u.rr_txt, level,
-					rc, rc != NULL ? rc->dns_r_h.ad : -1);
-			n = tlsaadd(host, rc, dane_tlsa, n, pttl, level + 1);
-			break;
-
-		}
+		int tlsa_chk;
 
 		if (rr->rr_type != T_TLSA)
 		{
-			if (tTd(8, 8))
-				sm_dprintf("tlsaadd(%s), type=%s\n", host,
+			if (rr->rr_type != T_CNAME && tTd(8, 8))
+				sm_dprintf("tlsaadd(%s), type=%s\n", name,
 					dns_type_to_string(rr->rr_type));
 			continue;
 		}
-		if (dane_tlsa_chk(rr->rr_u.rr_data, rr->rr_size, host, true)
-		    != TLSA_OK)
+		tlsa_chk = dane_tlsa_chk(rr->rr_u.rr_data, rr->rr_size, name,
+					true);
+		if (!TLSA_IS_VALID(tlsa_chk))
 			continue;
 
-		/* to do: the RRs should be sorted */
+		/*
+		**  To do: the RRs should be sorted (by "complexity") --
+		**  when more than one type is supported.
+		*/
+
 		dane_tlsa->dane_tlsa_rr[n] = rr->rr_u.rr_data;
 		dane_tlsa->dane_tlsa_len[n] = rr->rr_size;
 		if (tTd(8, 2))
@@ -149,7 +161,7 @@ tlsaadd(host, r, dane_tlsa, n, pttl, level)
 			unsigned char *p;
 
 			p = rr->rr_u.rr_data;
-			sm_dprintf("tlsaadd(%s), n=%d, %d-%d-%d:%02x\n", host,
+			sm_dprintf("tlsaadd(%s), n=%d, %d-%d-%d:%02x\n", name,
 				n, (int)p[0], (int)p[1], (int)p[2], (int)p[3]);
 		}
 
@@ -161,6 +173,41 @@ tlsaadd(host, r, dane_tlsa, n, pttl, level)
 		rr->rr_u.rr_data = NULL;
 		++n;
 	}
+
+	/* second: check for CNAME records, but only if no TLSA RR was added */
+	for (rr = dr->dns_r_head; rr != NULL && n < MAX_TLSA_RR && nprev == n;
+	     rr = rr->rr_next)
+	{
+		DNS_REPLY_T *drc;
+		int err, herr;
+
+		if (rr->rr_type != T_CNAME)
+			continue;
+		if (level > 1)
+		{
+			if (tTd(8, 2))
+				sm_dprintf("tlsaadd(%s), CNAME=%s, level=%d\n",
+					name, rr->rr_u.rr_txt, level);
+			continue;
+		}
+
+		drc = dns_lookup_int(rr->rr_u.rr_txt, C_IN, T_TLSA, 0, 0,
+			(Dane == DANE_SECURE &&
+			 !TLSA_IS_FL(dane_tlsa, TLSAFLNOADMX))
+			? SM_RES_DNSSEC : 0,
+			RR_RAW, &err, &herr);
+
+		if (tTd(8, 2))
+			sm_dprintf("tlsaadd(%s), CNAME=%s, level=%d, dr=%p, ad=%d, err=%d, herr=%d\n",
+				name, rr->rr_u.rr_txt, level,
+				(void *)drc, drc != NULL ? drc->dns_r_h.ad : -1,
+				err, herr);
+		nprev = n = tlsaadd(name, drc, dane_tlsa, herr, n, pttl,
+				level + 1);
+		dns_free_data(drc);
+		drc = NULL;
+	}
+
 	*pttl = ttl;
 	return n;
 }
@@ -170,77 +217,97 @@ tlsaadd(host, r, dane_tlsa, n, pttl, level)
 **
 **	Parameters:
 **		host -- host
+**		name -- name for stab entry key (if NULL: host)
+**		pste -- (pointer to) stab entry (output)
+**		flags -- TLSAFL*
+**		mxttl -- TTL of MX (or host)
+**		port -- port
 **
 **	Returns:
 **		The number of TLSA records found.
 **		<0 if there is an internal failure.
+**
+**	Side effects:
+**		Enters TLSA RRs into stab().
+**		If the DNS lookup fails temporarily, an "empty" entry is
+**		created with that DNS error code.
 */
 
-/*
-To Do:
-- port as option
-- existing entries
-- TTL
-- ?
-*/
-
-static int gettlsa __P((char *));
-
-static int
-gettlsa(host)
+int
+gettlsa(host, name, pste, flags, mxttl, port)
 	char *host;
+	char *name;
+	STAB **pste;
+	unsigned long flags;
+	unsigned int mxttl;
+	unsigned int port;
 {
-	unsigned short port;
-	DNS_REPLY_T *r;
-	int n_rrs;
+	DNS_REPLY_T *dr;
 	dane_tlsa_P dane_tlsa;
-	STAB *s;
+	STAB *ste;
 	time_t now;
 	unsigned int ttl;
-	int len;
+	int n_rrs, len, err, herr;
+	bool isrname;
 	char nbuf[MAXDNAME];
+	char key[MAXDNAME];
 
 	SM_REQUIRE(host != NULL);
+	if (pste != NULL)
+		*pste = NULL;
 	if ('\0' == *host)
 		return 0;
 
+	isrname = NULL == name;
+	if (isrname)
+		name = host;
 	now = 0;
-	r = NULL;
+	n_rrs = 0;
+	dr = NULL;
 	dane_tlsa = NULL;
-	len = strlen(host);
-	if (len > 1 && host[len - 1] == '.')
+	len = strlen(name);
+	if (len > 1 && name[len - 1] == '.')
 	{
-		len --;
-		host[len] = '\0';
+		len--;
+		name[len] = '\0';
 	}
 	else
 		len = -1;
-	s = stab(host, ST_TLSA_RR, ST_FIND);
-	if (s != NULL)
+	if (0 == port || tTd(66, 10))
+		port = 25;
+	(void) sm_snprintf(key, sizeof(key), "_%u..%s", port, name);
+	ste = stab(key, ST_TLSA_RR, ST_FIND);
+	if (tTd(8, 2))
+		sm_dprintf("gettlsa(%s, %s, ste=%p, pste=%p, flags=%lX, port=%d)\n",
+			host, isrname ? "" : name, (void *)ste, (void *)pste,
+			flags, port);
+
+	if (ste != NULL)
 	{
-		/*
-		**  already exists... just reuse it for now..
-		**  should be "renewed" (replaced) instead.
-		*/
-
-		dane_tlsa = s->s_tlsa;
-		if (dane_tlsa != NULL)
-		{
-			now = curtime();
-
-			if (dane_tlsa->dane_tlsa_exp > now)
-				dane_tlsa_clr(dane_tlsa);
-			else
-			{
-				n_rrs = dane_tlsa->dane_tlsa_n;
-				goto end;
-			}
-		}
-		s = NULL;
+		dane_tlsa = ste->s_tlsa;
+		if ((TLSAFLADMX & flags) != 0)
+			TLSA_CLR_FL(ste->s_tlsa, TLSAFLNOADMX);
 	}
 
-	if (tTd(8, 2))
-		sm_dprintf("gettlsa(%s)\n", host);
+	/* Do not reload TLSA RRs if the MX RRs were not securely retrieved. */
+	if (pste != NULL
+	    && dane_tlsa != NULL && TLSA_IS_FL(dane_tlsa, TLSAFLNOADMX)
+	    && DANE_SECURE == Dane)
+		goto end;
+
+	if (ste != NULL)
+	{
+		SM_ASSERT(dane_tlsa != NULL);
+		now = curtime();
+		if (dane_tlsa->dane_tlsa_exp <= now
+		    && 0 == (TLSAFLNOEXP & flags))
+			dane_tlsa_clr(dane_tlsa);
+		else
+		{
+			n_rrs = dane_tlsa->dane_tlsa_n;
+			goto end;
+		}
+	}
 
 	if (dane_tlsa == NULL)
 	{
@@ -253,46 +320,72 @@ gettlsa(host)
 		memset(dane_tlsa, '\0', sizeof(*dane_tlsa));
 	}
 
-	port = 25;
-	(void) sm_snprintf(nbuf, sizeof(nbuf), "_%hu._tcp.%s", port, host);
-	r = dns_lookup_int(nbuf, C_IN, T_TLSA, 0, 0, 0, RR_RAW);
+	/* There are flags to store -- just set those, do nothing else. */
+	if (TLSA_STORE_FL(flags))
+	{
+		dane_tlsa->dane_tlsa_flags = flags;
+		ttl = mxttl > 0 ? mxttl: SM_DEFAULT_TTL;
+		goto done;
+	}
+
+	(void) sm_snprintf(nbuf, sizeof(nbuf), "_%u._tcp.%s", port, host);
+	dr = dns_lookup_int(nbuf, C_IN, T_TLSA, 0, 0,
+		TLSA_IS_FL(dane_tlsa, TLSAFLNOADMX) ? 0 : SM_RES_DNSSEC,
+		RR_RAW, &err, &herr);
 	if (tTd(8, 2))
-		sm_dprintf("gettlsa(%s), r=%p, ad=%d\n", host, r,
-			r != NULL ? r->dns_r_h.ad : -1);
-
-	n_rrs = 0;
+		sm_dprintf("gettlsa(%s), dr=%p, ad=%d, err=%d, herr=%d\n", host,
+			(void *)dr, dr != NULL ? dr->dns_r_h.ad : -1, err, herr);
 	ttl = UINT_MAX;
-	n_rrs = tlsaadd(host, r, dane_tlsa, n_rrs, &ttl, 0);
+	n_rrs = tlsaadd(key, dr, dane_tlsa, herr, n_rrs, &ttl, 0);
 
-	/* no usable entries found? */
-	if (n_rrs == 0)
+	/* no valid entries found? */
+	if (n_rrs == 0 && !TLSA_RR_TEMPFAIL(dane_tlsa))
+	{
+		if (tTd(8, 2))
+			sm_dprintf("gettlsa(%s), n_rrs=%d, herr=%d, status=NOT_ADDED\n",
+				host, n_rrs, dane_tlsa->dane_tlsa_dnsrc);
 		goto cleanup;
+	}
 
+  done:
 	dane_tlsa->dane_tlsa_n = n_rrs;
-	s = stab(host, ST_TLSA_RR, ST_ENTER);
-	if (s == NULL)
-		goto error;
-	s->s_tlsa = dane_tlsa;
+	if (!isrname)
+	{
+		SM_FREE(dane_tlsa->dane_tlsa_sni);
+		dane_tlsa->dane_tlsa_sni = sm_strdup(host);
+	}
+	if (NULL == ste)
+	{
+		ste = stab(key, ST_TLSA_RR, ST_ENTER);
+		if (NULL == ste)
+			goto error;
+	}
+	ste->s_tlsa = dane_tlsa;
 	if (now == 0)
 		now = curtime();
 	dane_tlsa->dane_tlsa_exp = now + SM_MIN(ttl, SM_DEFAULT_TTL);
-	dns_free_data(r);
+	dns_free_data(dr);
+	dr = NULL;
 	goto end;
 
   error:
 	if (tTd(8, 2))
-		sm_dprintf("gettlsa(%s), status=error\n", host);
+		sm_dprintf("gettlsa(%s, %s), status=error\n", host, key);
 	n_rrs = -1;
   cleanup:
-	dane_tlsa_free(dane_tlsa);
-	dns_free_data(r);
+	if (NULL == ste)
+		dane_tlsa_free(dane_tlsa);
+	dns_free_data(dr);
+	dr = NULL;
 
   end:
+	if (pste != NULL && ste != NULL)
+		*pste = ste;
 	if (len > 0)
 		host[len] = '.';
 	return n_rrs;
 }
-#endif /* _FFR_TLSA_DANE */
+# endif /* DANE */
 
 /*
 **  GETFALLBACKMXRR -- get MX resource records for fallback MX host.
@@ -332,24 +425,39 @@ getfallbackmxrr(host)
 #endif /* 0 */
 	if (NumFallbackMXHosts > 0 && renew > curtime())
 		return NumFallbackMXHosts;
+
+	/* for DANE we need to invoke getmxrr() to get the TLSA RRs. */
+#if !DANE
 	if (host[0] == '[')
 	{
 		fbhosts[0] = host;
 		NumFallbackMXHosts = 1;
 	}
 	else
+#endif
 	{
 		/* free old data */
 		for (i = 0; i < NumFallbackMXHosts; i++)
 			sm_free(fbhosts[i]);
 
-		/* get new data */
-		NumFallbackMXHosts = getmxrr(host, fbhosts, NULL, ISAD,
-					     &rcode, &ttl);
+		/*
+		**  Get new data.
+		**  Note: passing 0 as port is not correct but we cannot
+		**  determine the port number as there is no mailer.
+		*/
+
+		NumFallbackMXHosts = getmxrr(host, fbhosts, NULL,
+#if DANE
+					(DANE_SECURE == Dane) ?  ISAD :
+#endif
+					0,
+					&rcode, &ttl, 0);
 		renew = curtime() + ttl;
 		for (i = 0; i < NumFallbackMXHosts; i++)
 			fbhosts[i] = newstr(fbhosts[i]);
 	}
+	if (NumFallbackMXHosts == NULLMX)
+		NumFallbackMXHosts = 0;
 	return NumFallbackMXHosts;
 }
 
@@ -418,13 +526,14 @@ fallbackmxrr(nmx, prefs, mxhosts)
 */
 
 int
-getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
+getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl, port)
 	char *host;
 	char **mxhosts;
 	unsigned short *mxprefs;
 	unsigned int flags;
 	int *rcode;
 	int *pttl;
+	int port;
 {
 	register unsigned char *eom, *cp;
 	register int i, j, n;
@@ -444,17 +553,30 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 	int weight[MAXMXHOSTS];
 	int ttl = 0;
 	bool ad;
+	bool seennullmx = false;
 	extern int res_query(), res_search();
+# if DANE
+	bool cname2mx;
+	char qname[MAXNAME];
+	unsigned long old_options = 0;
+# endif
 
 	if (tTd(8, 2))
-		sm_dprintf("getmxrr(%s, droplocalhost=%d)\n",
-			   host, (flags & DROPLOCALHOST) != 0);
+		sm_dprintf("getmxrr(%s, droplocalhost=%d, flags=%X, port=%d)\n",
+			   host, (flags & DROPLOCALHOST) != 0, flags, port);
 	ad = (flags & ISAD) != 0;
 	*rcode = EX_OK;
 	if (pttl != NULL)
 		*pttl = SM_DEFAULT_TTL;
 	if (*host == '\0')
 		return 0;
+# if DANE
+	cname2mx = false;
+	qname[0] = '\0';
+	old_options = _res.options;
+	if (ad)
+		_res.options |= SM_RES_DNSSEC;
+# endif
 
 	if ((fallbackMX != NULL && (flags & DROPLOCALHOST) != 0 &&
 	     wordinclass(fallbackMX, 'w')) || (flags & TRYFALLBACK) == 0)
@@ -472,6 +594,34 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 	if (host[0] == '[')
 		goto punt;
 
+# if DANE
+	/*
+	**  NOTE: This only works if nocanonify is used,
+	**  otherwise the name is already rewritten.
+	*/
+
+	/* always or only when "needed"? */
+	if (DANE_ALWAYS == Dane || (ad && DANE_SECURE == Dane))
+		(void) sm_strlcpy(qname, host, sizeof(qname));
+# endif /* DANE */
+
+# if _FFR_EAI
+	if (!addr_is_ascii(host))
+	{
+		char buf[1024];
+		UErrorCode error = U_ZERO_ERROR;
+		UIDNAInfo info = UIDNA_INFO_INITIALIZER;
+		UIDNA *idna;
+
+		idna = uidna_openUTS46(UIDNA_NONTRANSITIONAL_TO_ASCII, &error);
+		(void) uidna_nameToASCII_UTF8(idna, host, strlen(host),
+					     buf, sizeof(buf) - 1,
+					     &info, &error);
+		uidna_close(idna);
+		host = sm_rpool_strdup_x(CurEnv->e_rpool, buf);
+	}
+# endif /* _FFR_EAI */
+
 	/*
 	**  If we don't have MX records in our host switch, don't
 	**  try for MX records.  Note that this really isn't "right",
@@ -486,6 +636,10 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 		resfunc = res_query;
 	else
 		resfunc = res_search;
+# if DNSSEC_TEST
+	if (tTd(8, 110))
+		resfunc = tstdns_search;
+# endif
 
 	errno = 0;
 	hp = (HEADER *)&answer;
@@ -494,8 +648,14 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 	if (n < 0)
 	{
 		if (tTd(8, 1))
-			sm_dprintf("getmxrr: res_search(%s) failed (errno=%d, h_errno=%d)\n",
-				host, errno, h_errno);
+# if DNSSEC_TEST
+			sm_dprintf("getmxrr: res_search(%s) failed (errno=%d (%s), h_errno=%d (%s))\n",
+				host, errno, strerror(errno),
+				h_errno, herrno2txt(h_errno));
+# else
+			sm_dprintf("getmxrr: res_search(%s) failed, h_errno=%d\n",
+				host, h_errno);
+# endif
 		switch (h_errno)
 		{
 		  case NO_DATA:
@@ -508,8 +668,8 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 
 		  case HOST_NOT_FOUND:
 # if BROKEN_RES_SEARCH
-		  case 0:	/* Ultrix resolver retns failure w/ h_errno=0 */
-# endif /* BROKEN_RES_SEARCH */
+		  case 0: /* Ultrix resolver returns failure w/ h_errno=0 */
+# endif
 			/* host doesn't exist in DNS; might be in /etc/hosts */
 			trycanon = true;
 			*rcode = EX_NOHOST;
@@ -521,7 +681,8 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 			if (fallbackMX != NULL)
 			{
 				/* name server is hosed -- push to fallback */
-				return fallbackmxrr(nmx, prefs, mxhosts);
+				nmx = fallbackmxrr(nmx, prefs, mxhosts);
+				goto done;
 			}
 			/* it might come up later; better queue it up */
 			*rcode = EX_TEMPFAIL;
@@ -535,12 +696,12 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 		}
 
 		/* irreconcilable differences */
-		return -1;
+		goto error;
 	}
 
 	ad = ad && hp->ad;
 	if (tTd(8, 2))
-		sm_dprintf("getmxrr(%s), hp=%p, ad=%d\n", host, hp, ad);
+		sm_dprintf("getmxrr(%s), hp=%p, ad=%d\n", host, (void*)hp, ad);
 
 	/* avoid problems after truncation in tcp packets */
 	if (n > sizeof(answer))
@@ -576,15 +737,19 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 		cp += INT16SZ;		/* skip over class */
 		GETLONG(ttl, cp);
 		GETSHORT(n, cp);	/* rdlength */
+# if DANE
+		if (type == T_CNAME)
+			cname2mx = true;
+# endif
 		if (type != T_MX)
 		{
 			if ((tTd(8, 8) || _res.options & RES_DEBUG)
-# if _FFR_TLSA_DANE
+# if DANE
 			    && type != T_RRSIG
 # endif
 			    )
-				sm_dprintf("unexpected answer type %d, size %d\n",
-					type, n);
+				sm_dprintf("unexpected answer type %s, size %d\n",
+					dns_type_to_string(type), n);
 			cp += n;
 			continue;
 		}
@@ -594,6 +759,11 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 			break;
 		cp += n;
 		n = strlen(bp);
+
+		/* Support for RFC7505 "MX 0 ." */
+		if (pref == 0 && *bp == '\0')
+			seennullmx = true;
+
 		if (wordinclass(bp, 'w'))
 		{
 			if (tTd(8, 3))
@@ -612,9 +782,21 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 			weight[nmx] = mxrand(bp);
 		prefs[nmx] = pref;
 		mxhosts[nmx++] = bp;
-# if _FFR_TLSA_DANE
-		if (DANE_ALWAYS == Dane || (ad && DANE_SECURE == Dane))
-			gettlsa(bp);
+# if DANE
+		if (CHK_DANE(Dane) && port >= 0)
+		{
+			int nrr;
+			unsigned long flags;
+
+			flags = ad ? TLSAFLADMX : TLSAFLNOADMX;
+			nrr = gettlsa(bp, NULL, NULL, flags, ttl, port);
+
+			/* Only check qname if no TLSA RRs were found */
+			if (0 == nrr && cname2mx && '\0' != qname[0] &&
+			    strcmp(qname, bp))
+				gettlsa(qname, bp, NULL, flags, ttl, port);
+			/* XXX is this the right ad flag? */
+		}
 # endif
 
 		/*
@@ -636,6 +818,15 @@ getmxrr(host, mxhosts, mxprefs, flags, rcode, pttl)
 			break;
 		}
 		buflen -= n + 1;
+	}
+
+	/* Support for RFC7505 "MX 0 ." */
+	if (seennullmx && nmx == 1)
+	{
+		if (tTd(8, 4))
+			sm_dprintf("getmxrr: Null MX record found, domain doesn't accept mail (RFC7505)\n");
+		*rcode = EX_UNAVAILABLE;
+		return NULLMX;
 	}
 
 	/* return only one TTL entry, that should be sufficient */
@@ -720,7 +911,7 @@ punt:
 					     UseNameServer))
 					{
 						*rcode = EX_TEMPFAIL;
-						return -1;
+						goto error;
 					}
 # if NETINET6
 					SM_SET_H_ERRNO(0);
@@ -733,7 +924,7 @@ punt:
 					      UseNameServer)))
 					{
 						*rcode = EX_TEMPFAIL;
-						return -1;
+						goto error;
 					}
 # endif /* NETINET6 */
 				}
@@ -744,19 +935,19 @@ punt:
 				*rcode = EX_CONFIG;
 				syserr("MX list for %s points back to %s",
 				       host, MyHostName);
-				return -1;
+				goto error;
 			}
 # if NETINET6
 			freehostent(h);
 			h = NULL;
-# endif /* NETINET6 */
+# endif
 		}
 		if (strlen(host) >= sizeof(MXHostBuf))
 		{
 			*rcode = EX_CONFIG;
 			syserr("Host name %s too long",
 			       shortenstring(host, MAXSHORTSTR));
-			return -1;
+			goto error;
 		}
 		(void) sm_strlcpy(MXHostBuf, host, sizeof(MXHostBuf));
 		mxhosts[0] = MXHostBuf;
@@ -766,7 +957,7 @@ punt:
 			register char *p;
 # if NETINET6
 			struct sockaddr_in6 tmp6;
-# endif /* NETINET6 */
+# endif
 
 			/* this may be an MX suppression-style address */
 			p = strchr(MXHostBuf, ']');
@@ -806,13 +997,39 @@ punt:
 				*bp = '\0';
 			}
 			nmx = 1;
-# if _FFR_TLSA_DANE
+# if DANE
 			if (tTd(8, 3))
 				sm_dprintf("getmxrr=%s, getcanonname=%d\n",
 					mxhosts[0], n);
-			if (DANE_ALWAYS == Dane ||
-			    (ad && n == HOST_SECURE && DANE_SECURE == Dane))
-				gettlsa(mxhosts[0]);
+			if (CHK_DANE(Dane) && port >= 0)
+			{
+				int nrr;
+				unsigned long flags;
+				unsigned int cttl;
+
+				if (pttl != NULL)
+					cttl = *pttl;
+				else if (ttl > 0)
+					cttl = ttl;
+				else
+					cttl = SM_DEFAULT_TTL;
+
+				flags = (ad && n == HOST_SECURE)
+					? TLSAFLADMX : TLSAFLNOADMX;
+				nrr = gettlsa(mxhosts[0], NULL, NULL, flags,
+						cttl, port);
+
+				/*
+				**  Only check qname if no TLSA RRs were found
+				**  XXX: what about (temp) DNS errors?
+				*/
+
+				if (0 == nrr && '\0' != qname[0] &&
+				    strcmp(qname, mxhosts[0]))
+					gettlsa(qname, mxhosts[0], NULL, flags,
+						cttl, port);
+				/* XXX is this the right ad flag? */
+			}
 # endif
 		}
 	}
@@ -823,8 +1040,19 @@ punt:
 		/* TODO: DNSsec status of fallbacks */
 		nmx = fallbackmxrr(nmx, prefs, mxhosts);
 	}
+    done:
+# if DANE
+	_res.options = old_options;
+# endif
 	return nmx;
+
+   error:
+# if DANE
+	_res.options = old_options;
+# endif
+	return -1;
 }
+
 /*
 **  MXRAND -- create a randomizer for equal MX preferences
 **
@@ -895,15 +1123,15 @@ bestmx_map_lookup(map, name, av, statp)
 	ssize_t len = 0;
 	char *result;
 	char *mxhosts[MAXMXHOSTS + 1];
-#if _FFR_BESTMX_BETTER_TRUNCATION
+# if _FFR_BESTMX_BETTER_TRUNCATION
 	char *buf;
-#else /* _FFR_BESTMX_BETTER_TRUNCATION */
+# else
 	char *p;
 	char buf[PSBUFSIZE / 2];
-#endif /* _FFR_BESTMX_BETTER_TRUNCATION */
+# endif
 
 	_res.options &= ~(RES_DNSRCH|RES_DEFNAMES);
-	nmx = getmxrr(name, mxhosts, NULL, 0, statp, NULL);
+	nmx = getmxrr(name, mxhosts, NULL, 0, statp, NULL, -1);
 	_res.options = saveopts;
 	if (nmx <= 0)
 		return NULL;
@@ -917,7 +1145,7 @@ bestmx_map_lookup(map, name, av, statp)
 	**  ones.  We need to build them all into a list.
 	*/
 
-#if _FFR_BESTMX_BETTER_TRUNCATION
+# if _FFR_BESTMX_BETTER_TRUNCATION
 	for (i = 0; i < nmx; i++)
 	{
 		if (strchr(mxhosts[i], map->map_coldelim) != NULL)
@@ -954,7 +1182,7 @@ bestmx_map_lookup(map, name, av, statp)
 
 	/* Cleanly truncate for rulesets */
 	truncate_at_delim(buf, PSBUFSIZE / 2, map->map_coldelim);
-#else /* _FFR_BESTMX_BETTER_TRUNCATION */
+# else /* _FFR_BESTMX_BETTER_TRUNCATION */
 	p = buf;
 	for (i = 0; i < nmx; i++)
 	{
@@ -978,12 +1206,12 @@ bestmx_map_lookup(map, name, av, statp)
 		p += slen;
 		len += slen;
 	}
-#endif /* _FFR_BESTMX_BETTER_TRUNCATION */
+# endif /* _FFR_BESTMX_BETTER_TRUNCATION */
 
 	result = map_rewrite(map, buf, len, av);
-#if _FFR_BESTMX_BETTER_TRUNCATION
+# if _FFR_BESTMX_BETTER_TRUNCATION
 	sm_free(buf);
-#endif /* _FFR_BESTMX_BETTER_TRUNCATION */
+# endif
 	return result;
 }
 /*
@@ -1036,13 +1264,17 @@ dns_getcanonname(host, hbsize, trymx, statp, pttl)
 	char *mxmatch;
 	bool amatch, gotmx, ad;
 	char nbuf[SM_MAX(MAXPACKET, MAXDNAME*2+2)];
-#if DNSSEC_TEST
-# define ADDSL	1 /* NameSearchList may add another entry to searchlist! */
-#else
-# define ADDSL	0
-#endif
+# if DNSSEC_TEST
+#  define ADDSL	1 /* NameSearchList may add another entry to searchlist! */
+# else
+#  define ADDSL	0
+# endif
 	char *searchlist[MAXDNSRCH + 2 + ADDSL];
-#define SLSIZE SM_ARRAY_SIZE(searchlist)
+# define SLSIZE SM_ARRAY_SIZE(searchlist)
+	int (*resqdomain) __P((const char *, const char *, int, int, unsigned char *, int));
+# if DANE
+	unsigned long old_options = 0;
+# endif
 
 	ttl = 0;
 	gotmx = false;
@@ -1056,7 +1288,18 @@ dns_getcanonname(host, hbsize, trymx, statp, pttl)
 		return HOST_NOTFOUND;
 	}
 
+# if DANE
+	old_options = _res.options;
+	if (DANE_SECURE == Dane)
+		_res.options |= SM_RES_DNSSEC;
+# endif
+
 	*statp = EX_OK;
+	resqdomain = res_querydomain;
+# if DNSSEC_TEST
+	if (tTd(8, 110))
+		resqdomain = tstdns_querydomain;
+# endif
 
 	/*
 	**  Initialize domain search list.  If there is at least one
@@ -1091,13 +1334,13 @@ cnameloop:
 	sli = 0;
 	if (n > 0)
 		searchlist[sli++] = "";
-#if DNSSEC_TEST
+# if DNSSEC_TEST
 	if (NameSearchList != NULL)
 	{
 		SM_ASSERT(sli < SLSIZE);
 		searchlist[sli++] = NameSearchList;
 	}
-#endif
+# endif
 	if (n >= 0 && *--cp != '.' && bitset(RES_DNSRCH, _res.options))
 	{
 		/* make sure there are less than MAXDNSRCH domains */
@@ -1128,7 +1371,7 @@ cnameloop:
 # if NETINET6
 	if (InetMode == AF_INET6)
 		initial = T_AAAA;
-# endif /* NETINET6 */
+# endif
 	qtype = initial;
 
 	for (sli = 0; sli < SLSIZE; )
@@ -1143,13 +1386,13 @@ cnameloop:
 				host, dp,
 # if NETINET6
 				qtype == T_AAAA ? "AAAA" :
-# endif /* NETINET6 */
+# endif
 				qtype == T_A ? "A" :
 				qtype == T_MX ? "MX" :
 				"???");
 		errno = 0;
 		hp = (HEADER *) &answer;
-		ret = res_querydomain(host, dp, C_IN, qtype,
+		ret = (*resqdomain)(host, dp, C_IN, qtype,
 				      answer.qb2, sizeof(answer.qb2));
 		if (ret <= 0)
 		{
@@ -1187,10 +1430,10 @@ cnameloop:
 					*/
 
 					if (save_errno != ETIMEDOUT)
-						return HOST_NOTFOUND;
+						goto error;
 				}
 				else
-					return HOST_NOTFOUND;
+					goto error;
 			}
 
 nexttype:
@@ -1249,7 +1492,7 @@ nexttype:
 					sm_dprintf("qdcount failure (%d)\n",
 						ntohs((unsigned short) hp->qdcount));
 				*statp = EX_SOFTWARE;
-				return HOST_NOTFOUND;	/* ???XXX??? */
+				goto error;
 			}
 		}
 
@@ -1298,7 +1541,7 @@ nexttype:
 
 # if NETINET6
 			  case T_AAAA:
-# endif /* NETINET6 */
+# endif
 			  case T_A:
 				/* Flag that a good match was found */
 				amatch = true;
@@ -1333,7 +1576,7 @@ nexttype:
 					}
 					SM_SET_H_ERRNO(NO_RECOVERY);
 					*statp = EX_CONFIG;
-					return HOST_NOTFOUND;
+					goto error;
 				}
 
 				/* value points at name */
@@ -1379,7 +1622,7 @@ nexttype:
 		if (qtype == T_AAAA)
 			qtype = T_A;
 		else
-# endif /* NETINET6 */
+# endif
 		if (qtype == T_A && !gotmx && (trymx || *dp == '\0'))
 			qtype = T_MX;
 		else
@@ -1394,7 +1637,7 @@ nexttype:
 	{
 		if (*statp == EX_OK)
 			*statp = EX_NOHOST;
-		return HOST_NOTFOUND;
+		goto error;
 	}
 
 	/*
@@ -1414,7 +1657,16 @@ nexttype:
 	/* return only one TTL entry, that should be sufficient */
 	if (ttl > 0 && pttl != NULL)
 		*pttl = ttl;
+# if DANE
+	_res.options = old_options;
+# endif
 	return ad ? HOST_SECURE : HOST_OK;
+
+  error:
+# if DANE
+	_res.options = old_options;
+# endif
+	return HOST_NOTFOUND;
 }
 
 #endif /* NAMED_BIND */

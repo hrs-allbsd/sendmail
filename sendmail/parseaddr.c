@@ -275,12 +275,14 @@ invalidaddr(addr, delimptr, isrcpt)
 	}
 	for (; *addr != '\0'; addr++)
 	{
+#if !_FFR_EAI
 		if (!EightBitAddrOK && (*addr & 0340) == 0200)
 		{
 			setstat(EX_USAGE);
 			result = true;
 			*addr = BAD_CHAR_REPLACEMENT;
 		}
+#endif
 		if (++len > MAXNAME - 1)
 		{
 			char saved = *addr;
@@ -352,7 +354,7 @@ hasctrlchar(addr, isrcpt, complain)
 			}
 			result = "too long";
 		}
-		if (!EightBitAddrOK && !quoted && (*addr < 32 || *addr == 127))
+		if (!quoted && ((unsigned char)*addr < 32 || *addr == 127))
 		{
 			result = "non-printable character";
 			*addr = BAD_CHAR_REPLACEMENT;
@@ -370,6 +372,7 @@ hasctrlchar(addr, isrcpt, complain)
 				break;
 			}
 		}
+#if !_FFR_EAI
 		if (!EightBitAddrOK && (*addr & 0340) == 0200)
 		{
 			setstat(EX_USAGE);
@@ -377,6 +380,7 @@ hasctrlchar(addr, isrcpt, complain)
 			*addr = BAD_CHAR_REPLACEMENT;
 			continue;
 		}
+#endif
 	}
 	if (quoted)
 		result = "unbalanced quote"; /* unbalanced quote */
@@ -874,7 +878,7 @@ prescan(addr, delim, pvpbuf, pvpbsize, delimptr, toktab, ignore)
 				char *ptr = p;
 
 				anglecnt++;
-				while (isascii(*ptr) && isspace(*ptr))
+				while (SM_ISSPACE(*ptr))
 					ptr++;
 				if (*ptr == '@')
 					route_syntax = true;
@@ -893,7 +897,7 @@ prescan(addr, delim, pvpbuf, pvpbsize, delimptr, toktab, ignore)
 					anglecnt--;
 				route_syntax = false;
 			}
-			else if (delim == ' ' && isascii(c) && isspace(c))
+			else if (delim == ' ' && SM_ISSPACE(c))
 				c = ' ';
 
 			if (c == NOCHAR)
@@ -1356,7 +1360,7 @@ rewrite(pvp, ruleset, reclevel, e, maxatom)
 					pp = m->match_first;
 					while (pp <= m->match_last)
 					{
-						sm_dprintf(" %p=\"", *pp);
+						sm_dprintf(" %p=\"", (void *)*pp);
 						sm_dflush();
 						sm_dprintf("%s\"", *pp++);
 					}
@@ -2298,8 +2302,8 @@ cataddr(pvp, evp, buf, sz, spacesub, external)
 			**  If the current character (c) is METAQUOTE and we
 			**  want the "external" form and the next character
 			**  is not NUL, then overwrite METAQUOTE with that
-			**  character (i.e., METAQUOTE ch is changed to
-			**  ch).  p[-1] is used because p is advanced (above).
+			**  character (i.e., METAQUOTE ch is changed to ch).
+			**  p[-1] is used because p is advanced (above).
 			*/
 
 			if ((c & 0377) == METAQUOTE && external && *q != '\0')
@@ -2476,7 +2480,7 @@ printaddr(fp, a, follow)
 
 	while (a != NULL)
 	{
-		(void) sm_io_fprintf(fp, SM_TIME_DEFAULT, "%p=", a);
+		(void) sm_io_fprintf(fp, SM_TIME_DEFAULT, "%p=", (void *)a);
 		(void) sm_io_flush(fp, SM_TIME_DEFAULT);
 
 		/* find the mailer -- carefully */
@@ -2579,7 +2583,7 @@ printaddr(fp, a, follow)
 		}
 		(void) sm_io_fprintf(fp, SM_TIME_DEFAULT,
 				     ", next=%p, alias %p, uid %d, gid %d\n",
-				     a->q_next, a->q_alias,
+				     (void *)a->q_next, (void *)a->q_alias,
 				     (int) a->q_uid, (int) a->q_gid);
 		(void) sm_io_fprintf(fp, SM_TIME_DEFAULT, "\tflags=%lx<",
 				     a->q_flags);
@@ -2946,7 +2950,7 @@ dequote_init(map, args)
 	map->map_mflags |= MF_KEEPQUOTES;
 	for (;;)
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -2965,7 +2969,7 @@ dequote_init(map, args)
 			map->map_spacesub = *++p;
 			break;
 		}
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 			p++;
 		if (*p != '\0')
 			*p = '\0';
@@ -3079,7 +3083,7 @@ dequote_map(map, name, av, statp)
 **	Parameters:
 **		rwset -- the rewriting set to use.
 **		p1 -- the first string to check.
-**		p2 -- the second string to check -- may be null.
+**		p2 -- the second string to check -- may be NULL.
 **		e -- the current envelope.
 **		flags -- control some behavior, see RSF_ in sendmail.h
 **		logl -- logging level.
@@ -3318,7 +3322,7 @@ rscheck(rwset, p1, p2, e, flags, logl, host, logid, addr, addrstr)
 **	Parameters:
 **		rwset -- the rewriting set to use.
 **		p1 -- the first string to check.
-**		p2 -- the second string to check -- may be null.
+**		p2 -- the second string to check -- may be NULL.
 **		e -- the current envelope.
 **		pvp -- pointer to token vector.
 **		pvpbuf -- buffer space.

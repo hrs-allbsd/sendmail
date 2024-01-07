@@ -269,13 +269,13 @@ mi_milteropen(conn, backlog, rmsocket, name)
 	if (
 # if NETINET
 	    addr.sa.sa_family == AF_INET
-# endif /* NETINET */
+# endif
 # if NETINET && NETINET6
 	    ||
-# endif /* NETINET && NETINET6 */
+# endif
 # if NETINET6
 	    addr.sa.sa_family == AF_INET6
-# endif /* NETINET6 */
+# endif
 	   )
 	{
 		unsigned short port;
@@ -290,13 +290,13 @@ mi_milteropen(conn, backlog, rmsocket, name)
 			  case AF_INET:
 				addr.sin.sin_addr.s_addr = INADDR_ANY;
 				break;
-# endif /* NETINET */
+# endif
 
 # if NETINET6
 			  case AF_INET6:
 				addr.sin6.sin6_addr = in6addr_any;
 				break;
-# endif /* NETINET6 */
+# endif
 			}
 		}
 		else

@@ -43,7 +43,7 @@
 
 /* $Id: sm_resolve.h,v 8.9 2013-11-22 20:51:56 ca Exp $ */
 
-#if DNSMAP
+#if DNSMAP || DANE
 # ifndef __ROKEN_RESOLVE_H__
 #  define __ROKEN_RESOLVE_H__
 
@@ -61,12 +61,12 @@
 #  ifndef T_NAPTR
 #   define T_NAPTR		35
 #  endif
-# ifndef T_RRSIG
-#  define T_RRSIG		46
-# endif
-# ifndef T_TLSA
-#  define T_TLSA		52
-# endif
+#  ifndef T_RRSIG
+#   define T_RRSIG		46
+#  endif
+#  ifndef T_TLSA
+#   define T_TLSA		52
+#  endif
 
 typedef struct
 {
@@ -131,9 +131,12 @@ typedef struct
 #define SM_DNS_FL_EDNS0		0x01
 #define SM_DNS_FL_DNSSEC	0x02
 
-/* flags for parse_dns_reply() */
+/* flags for parse_dns_reply() et.al. */
 #define RR_AS_TEXT	0x01	/* convert some RRs to text, e.g., TLSA */
 #define RR_RAW		0x02	/* return some RRs as "raw" data */
+			/* currently not used (set, but not read) */
+#define RR_NO_CNAME	0x04	/* do not try CNAME lookup */
+#define RR_ONLY_CNAME	0x08	/* if !RR_NO_CNAME" return only CNAME */
 
 extern void		dns_free_data __P((DNS_REPLY_T *));
 extern int		dns_string_to_type __P((const char *));
@@ -141,24 +144,43 @@ extern const char	*dns_type_to_string __P((int));
 extern DNS_REPLY_T	*dns_lookup_map __P((const char *, int, int, time_t,
 				int, unsigned int));
 extern DNS_REPLY_T	*dns_lookup_int __P((const char *, int, int, time_t,
-				int, unsigned int, unsigned int));
+				int, unsigned int, unsigned int, int *, int *));
 #  if 0
 extern DNS_REPLY_T	*dns_lookup __P((const char *domain,
 				const char *type_name,
 				time_t retrans,
 				int retry));
 #  endif /* 0 */
-#if DNSSEC_TEST
-#ifdef _DEFINE_SMR_GLOBALS
-# define SMR_EXTERN
-#else
-# define SMR_EXTERN extern
-#endif
+
+#  if DANE
+struct hostent *dns2he __P((DNS_REPLY_T *, int));
+#  endif
+
+/* what to do if family is not supported? add SM_ASSERT()? */
+#define FAM2T_(family) (((family) == AF_INET) ? T_A : T_AAAA)
+
+#  if DNSSEC_TEST
+const char *herrno2txt __P((int));
+int setherrnofromstring __P((const char *, int *));
+int getttlfromstring __P((const char *));
+int tstdns_search __P((const char *, int, int, u_char *, int));
+int tstdns_querydomain  __P((const char *, const char *, int, int, unsigned char *, int));
+
+#   ifdef _DEFINE_SMR_GLOBALS
+#    define SMR_EXTERN
+#   else
+#    define SMR_EXTERN extern
+#   endif
 SMR_EXTERN char *NameSearchList;
-# undef SMR_EXTERN
+#   undef SMR_EXTERN
 extern void	dns_setns __P((struct in_addr *, unsigned int));
 extern int	nsportip __P((char *));
+#  endif /* DNSSEC_TEST*/
+
+#ifndef RES_TRUSTAD
+# define RES_TRUSTAD	0
 #endif
+#define SM_RES_DNSSEC (RES_USE_EDNS0|RES_USE_DNSSEC|RES_TRUSTAD)
 
 # endif /* ! __ROKEN_RESOLVE_H__ */
-#endif /* DNSMAP */
+#endif /* DNSMAP || DANE */

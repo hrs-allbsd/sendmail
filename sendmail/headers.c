@@ -174,7 +174,7 @@ dochompheader(line, pflag, hdrp, e)
 	while (isascii(*p) && isgraph(*p) && *p != ':')
 		p++;
 	fvalue = p;
-	while (isascii(*p) && isspace(*p))
+	while (SM_ISSPACE(*p))
 		p++;
 	if (*p++ != ':' || fname == fvalue)
 	{
@@ -186,7 +186,7 @@ hse:
 	fvalue = p;
 
 	/* if the field is null, go ahead and use the default */
-	while (isascii(*p) && isspace(*p))
+	while (SM_ISSPACE(*p))
 		p++;
 	if (*p == '\0')
 		nullheader = true;
@@ -201,7 +201,7 @@ hse:
 		char hbuf[50];
 
 		(void) expand(fvalue, hbuf, sizeof(hbuf), e);
-		for (p = hbuf; isascii(*p) && isspace(*p); )
+		for (p = hbuf; SM_ISSPACE(*p); )
 			p++;
 		if ((*p++ & 0377) == CALLSUBR)
 		{
@@ -735,7 +735,7 @@ hvalue(field, header)
 			s = h->h_value;
 			if (s == NULL)
 				return NULL;
-			while (isascii(*s) && isspace(*s))
+			while (SM_ISSPACE(*s))
 				s++;
 			return s;
 		}
@@ -783,7 +783,7 @@ isheader(h)
 		return false;
 
 	/* following technically violates RFC822 */
-	while (isascii(*s) && isspace(*s))
+	while (SM_ISSPACE(*s))
 		s++;
 
 	return (*s == ':');
@@ -900,7 +900,7 @@ eatheader(e, full, log)
 		{
 #if 0
 			int saveflags = e->e_flags;
-#endif /* 0 */
+#endif
 
 			(void) sendtolist(denlstring(h->h_value, true, false),
 					  NULLADDR, &e->e_sendqueue, 0, e);
@@ -1198,13 +1198,7 @@ logsender(e, msgid)
 		sbp += strlen(sbp);
 	}
 # if _FFR_LOG_MORE1
-#  if STARTTLS
-	p = macvalue(macid("{verify}"), e);
-	if (p == NULL || *p == '\0')
-		p = "NONE";
-	(void) sm_snprintf(sbp, SPACELEFT(sbuf, sbp), ", tls_verify=%.20s", p);
-	sbp += strlen(sbp);
-#  endif /* STARTTLS */
+	LOG_MORE(sbuf, sbp);
 #  if SASL
 	p = macvalue(macid("{auth_type}"), e);
 	if (p == NULL || *p == '\0')
@@ -1329,7 +1323,7 @@ priencode(p)
 
 #if MAXNAME < 10
 ERROR MAXNAME must be at least 10
-#endif /* MAXNAME < 10 */
+#endif
 
 char *
 crackaddr(addr, e)
@@ -1364,7 +1358,7 @@ crackaddr(addr, e)
 	bp = bufhead = buf;
 
 	/* skip over leading spaces but preserve them */
-	while (*addr != '\0' && isascii(*addr) && isspace(*addr))
+	while (*addr != '\0' && SM_ISSPACE(*addr))
 	{
 		SM_APPEND_CHAR(*addr);
 		addr++;
@@ -1530,7 +1524,7 @@ crackaddr(addr, e)
 			}
 
 			/* any trailing white space is part of group: */
-			while (isascii(*p) && isspace(*p))
+			while (SM_ISSPACE(*p))
 			{
 				SM_APPEND_CHAR(*p);
 				p++;
@@ -2070,7 +2064,7 @@ commaize(h, p, oldstyle, mci, e, putflags)
 	obp += opos;
 
 	spaces = 0;
-	while (*p != '\0' && isascii(*p) && isspace(*p))
+	while (*p != '\0' && SM_ISSPACE(*p))
 	{
 		++spaces;
 		++p;
@@ -2119,7 +2113,7 @@ commaize(h, p, oldstyle, mci, e, putflags)
 		*/
 
 		/* find end of name */
-		while ((isascii(*p) && isspace(*p)) || *p == ',')
+		while ((SM_ISSPACE(*p)) || *p == ',')
 			p++;
 		name = p;
 		res = NULL;
@@ -2141,7 +2135,7 @@ commaize(h, p, oldstyle, mci, e, putflags)
 #endif /* _FFR_IGNORE_BOGUS_ADDR */
 
 			/* look to see if we have an at sign */
-			while (*p != '\0' && isascii(*p) && isspace(*p))
+			while (*p != '\0' && SM_ISSPACE(*p))
 				p++;
 
 			if (*p != '@')
@@ -2150,14 +2144,14 @@ commaize(h, p, oldstyle, mci, e, putflags)
 				break;
 			}
 			++p;
-			while (*p != '\0' && isascii(*p) && isspace(*p))
+			while (*p != '\0' && SM_ISSPACE(*p))
 				p++;
 		}
 		/* at the end of one complete name */
 
 		/* strip off trailing white space */
 		while (p >= name &&
-		       ((isascii(*p) && isspace(*p)) || *p == ',' || *p == '\0'))
+		       ((SM_ISSPACE(*p)) || *p == ',' || *p == '\0'))
 			p--;
 		if (++p == name)
 			continue;
@@ -2168,7 +2162,7 @@ commaize(h, p, oldstyle, mci, e, putflags)
 		*/
 
 		if (res == NULL && p > name &&
-		    !((isascii(*p) && isspace(*p)) || *p == ',' || *p == '\0'))
+		    !((SM_ISSPACE(*p)) || *p == ',' || *p == '\0'))
 			--p;
 		savechar = *p;
 		*p = '\0';

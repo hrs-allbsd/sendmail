@@ -91,7 +91,7 @@ struct sm_ldap_struct
 	/* ldapmap_lookup options */
 	char		ldap_attrsep;
 
-#  if _FFR_LDAP_NETWORK_TIMEOUT
+#  if LDAP_NETWORK_TIMEOUT
 	int		ldap_networktmo;
 #  endif
 #  if _FFR_SM_LDAP_DBG

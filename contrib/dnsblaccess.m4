@@ -66,7 +66,7 @@ ifdef(`_ACCESS_TABLE_', `dnl',
 ifdef(`_EDNSBL_R_',`dnl',`dnl
 define(`_EDNSBL_R_', `1')dnl ## prevent multiple redefines of the map.
 LOCAL_CONFIG
-# map for enhanced DNS based blacklist lookups
+# map for enhanced DNS based blocklist lookups
 Kednsbl dns -R A -a. -T<TMP> -r`'ifdef(`EDNSBL_TO',`EDNSBL_TO',`5')
 ')
 divert(-1)

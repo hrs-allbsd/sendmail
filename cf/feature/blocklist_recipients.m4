@@ -10,9 +10,10 @@ divert(-1)
 #
 
 divert(0)
-VERSIONID(`$Id: blacklist_recipients.m4,v 8.14 2013-11-22 20:51:11 ca Exp $')
+VERSIONID(`$Id: blocklist_recipients.m4,v 8.14 2013-11-22 20:51:11 ca Exp $')
 divert(-1)
 
-errprint(`WARNING: FEATURE(blacklist_recipients) is deprecated; use FEATURE(blocklist_recipients.m4).
-')
-FEATURE(`blocklist_recipients')
+ifdef(`_ACCESS_TABLE_',
+	`define(`_BLOCKLIST_RCPT_', 1)',
+	`errprint(`*** ERROR: FEATURE(blocklist_recipients) requires FEATURE(access_db)
+')')

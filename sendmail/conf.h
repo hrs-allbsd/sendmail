@@ -16,8 +16,9 @@
 /*
 **  CONF.H -- All user-configurable parameters for sendmail
 **
-**	Send updates to sendmail@Sendmail.ORG so they will be
-**	included in the next release.
+**	Send updates to sendmail-YYYY@support.sendmail.org
+**	(replace YYYY with the current year)
+**	so they will be included in the next release.
 */
 
 #ifndef CONF_H
@@ -33,7 +34,7 @@ struct rusage;	/* forward declaration to get gcc to shut up in wait.h */
 # ifndef __QNX__
 /* in QNX this grabs bogus LOCK_* manifests */
 #  include <sys/file.h>
-# endif /* ! __QNX__ */
+# endif
 # include <sys/wait.h>
 # include <limits.h>
 # include <fcntl.h>
@@ -152,9 +153,9 @@ struct rusage;	/* forward declaration to get gcc to shut up in wait.h */
 # ifndef AUTH_MECHANISMS
 #  if STARTTLS
 #   define AUTH_MECHANISMS	"EXTERNAL GSSAPI KERBEROS_V4 DIGEST-MD5 CRAM-MD5"
-#  else /* STARTTLS */
+#  else
 #   define AUTH_MECHANISMS	"GSSAPI KERBEROS_V4 DIGEST-MD5 CRAM-MD5"
-#  endif /* STARTTLS */
+#  endif
 # endif /* ! AUTH_MECHANISMS */
 #endif /* SASL */
 

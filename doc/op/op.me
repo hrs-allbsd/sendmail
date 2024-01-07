@@ -148,8 +148,9 @@ RFC 2554 (SMTP Service Extension for Authentication),
 RFC 2821 (Simple Mail Transfer Protocol),
 RFC 2822 (Internet Message Format),
 RFC 2852 (Deliver By SMTP Service Extension),
+RFC 2920 (SMTP Service Extension for Command Pipelining),
 and
-RFC 2920 (SMTP Service Extension for Command Pipelining).
+RFC 7505 (A "Null MX" No Service Resource Record for Domains That Accept No Mail).
 However, since
 .i sendmail
 is designed to work in a wider world,
@@ -4533,15 +4534,26 @@ File containing a certificate.
 File containing the private key for the certificate.
 .ip Flags
 Currently the only valid flags are
+.br
 .i R
 to require a CRL for each encountered certificate during verification
 (by default a missing CRL is ignored),
+.br
 .i c
 and
 .i C
 which basically clears/sets the option
 .i TLSFallbacktoClear
-for just this session, respectively.
+for just this session, respectively,
+.br
+.i d
+to turn off DANE which is obviously only valid for
+.i tls_clt_features
+and requires DANE to be compiled in.
+This might be needed in case of a misconfiguration,
+e.g.,
+specifying invalid TLSA RRs.
+.br
 .lp
 .lp
 Example:
@@ -4628,7 +4640,7 @@ pause.
 If the return value starts with anything else or is not a number,
 it is silently ignored.
 Note: this ruleset is not invoked (and hence the feature is disabled)
-when the smtps (SMTP over SSL) is used, i.e.,
+when smtps (SMTP over SSL) is used, i.e.,
 the
 .i s
 modifier is set for the daemon via
@@ -6977,7 +6989,7 @@ can be a sequence (without any delimiters)
 of the following characters:
 .(b
 .ta 1i
-a	always require authentication
+a	always require AUTH
 b	bind to interface through which mail has been received
 c	perform hostname canonification (.cf)
 f	require fully qualified hostname (.cf)
@@ -6990,7 +7002,7 @@ O	optional; if opening the socket fails ignore it
 S	don't offer STARTTLS
 .)b
 That is, one way to specify a message submission agent (MSA) that
-always requires authentication is:
+always requires AUTH is:
 .(b
 O DaemonPortOptions=Name=MSA, Port=587, M=Ea
 .)b
@@ -9534,6 +9546,11 @@ timeout: specify the timeout (in seconds) for communication
 with the socket map server.
 .pp
 The following additional flags are present in the ldap map only:
+.ip "\-c\fItimeout\fP"
+Set the LDAP network timeout.
+sendmail must be compiled with
+.b \-DLDAP_OPT_NETWORK_TIMEOUT
+to use this flag.
 .ip "\-R"
 Do not auto chase referrals.  sendmail must be compiled with
 .b \-DLDAP_REFERRALS
@@ -11132,13 +11149,12 @@ as well as
 {auth_authen} and {auth_author}.
 .sh 2 "DANE"
 .pp
-Experimental, partial support for DANE (see RFC 7672 et.al.)
+Initial support for DANE (see RFC 7672 et.al.)
 is available if
 .i sendmail
 is compiled with the option
-.b _FFR_TLSA_DANE .
-Only TLSA RR 3-1-1 (DANE-EE) is currently implemented
-and the port is hardcoded to 25.
+.b DANE .
+Only TLSA RR 3-1-x (DANE-EE) is currently implemented.
 The option
 .(b
 O DANE=true
@@ -11152,6 +11168,9 @@ to
 .(b
 O ResolverOptions
 .)b
+This requires a (preferrably local)
+validating DNS resolver which supports those options.
+
 If the client finds a usable TLSA RR and the check
 succeeds the macro
 .b ${verify}
@@ -11160,6 +11179,11 @@ is set to
 All non-DNS maps are considered
 .i secure
 just like DNS lookups with DNSSEC.
+Be aware that the implementation might not handle all
+error conditions as required by the RFCs.
+Moreover, TLSA RRs are not looked up for some features,
+e.g.,
+.i FallBackSmartHost .
 .sh 1 "ACKNOWLEDGEMENTS"
 .pp
 I've worked on
@@ -11668,11 +11692,10 @@ but is actually realiased when the job is processed.
 There will be one line for each recipient.
 Version 1 qf files
 also include a leading colon-terminated list of flags,
-which can be
+some of which are
 `S' to return a message on successful final delivery,
 `F' to return a message on failure,
 `D' to return a message if the message is delayed,
-`B' to indicate that the body should be returned,
 `N' to suppress returning the body,
 and
 `P' to declare this as a ``primary'' (command line or SMTP-session) address.

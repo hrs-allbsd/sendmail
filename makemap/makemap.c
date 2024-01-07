@@ -429,7 +429,7 @@ main(argc, argv)
 #define FULLPATHFROMCF	(strcmp(typename, "cf") == 0)
 
 #if HASFCHOWN
-	if (!unmake && geteuid() == 0)
+	if (geteuid() == 0)
 	{
 		if (TYPEFROMCF)
 			typename = readcf(cfile, mapname, FULLPATHFROMCF);

@@ -56,7 +56,7 @@ static taskmgr_T     Tskmgr = {0};
 
 #ifndef USE_PIPE_WAKE_POLL
 # define USE_PIPE_WAKE_POLL 1
-#endif /* USE_PIPE_WAKE_POLL */
+#endif
 
 /* poll check periodicity (default 10000 - 10 s) */
 #define POLL_TIMEOUT   10000
@@ -83,7 +83,7 @@ static int mi_list_del_ctx __P((SMFICTX_PTR));
 
 #ifndef OLD_SESSION_TIMEOUT
 # define OLD_SESSION_TIMEOUT      ctx->ctx_timeout
-#endif /* OLD_SESSION_TIMEOUT */
+#endif
 
 /* session states - with respect to the pool of workers */
 #define WKST_INIT		0	/* initial state */

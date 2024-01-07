@@ -161,7 +161,7 @@ ifdef(`_ACCESS_TABLE_', `dnl
 # access_db acceptance class
 C{Accept}OK RELAY
 ifdef(`_DELAY_COMPAT_8_10_',`dnl
-ifdef(`_BLACKLIST_RCPT_',`dnl
+ifdef(`_BLOCKLIST_RCPT_',`dnl
 # possible access_db RHS for spam friends/haters
 C{SpamTag}SPAMFRIEND SPAMHATER')')',
 `dnl')
@@ -698,6 +698,8 @@ _OPTION(DHParameters, `confDH_PARAMETERS', `')
 _OPTION(RandFile, `confRAND_FILE', `')
 # fingerprint algorithm (digest) to use for the presented cert
 _OPTION(CertFingerprintAlgorithm, `confCERT_FINGERPRINT_ALGORITHM', `')
+# enable DANE?
+_OPTION(DANE, `confDANE', `false')
 
 # Maximum number of "useless" commands before slowing down
 _OPTION(MaxNOOPCommands, `confMAX_NOOP_COMMANDS', `20')
@@ -1743,7 +1745,7 @@ dnl if mark is <NO> then change it to <RELAY> if domain is "authorized"
 
 dnl what if access map returns something else than RELAY?
 dnl we are only interested in RELAY entries...
-dnl other To: entries: blacklist recipient; generic entries?
+dnl other To: entries: blocklist recipient; generic entries?
 dnl if it is an error we probably do not want to relay anyway
 ifdef(`_RELAY_HOSTS_ONLY_',
 `R<NO> $* < @ $=R >		$: <RELAY> $1 < @ $2 >
@@ -2118,9 +2120,9 @@ R$* $=O $* < @ $* @@ $=w . > $*	$@ $>"Rcpt_ok" $1 $2 $3
 R$* < @ $* @@ $=w . > $*	$: $1 < @ $3 > $4
 R$* < @ $* @@ $* > $*		$: $1 < @ $2 > $4')
 
-ifdef(`_BLACKLIST_RCPT_',`dnl
+ifdef(`_BLOCKLIST_RCPT_',`dnl
 ifdef(`_ACCESS_TABLE_', `dnl
-# blacklist local users or any host from receiving mail
+# blocklist local users or any host from receiving mail
 R$*			$: <?> $1
 dnl user is now tagged with @ to be consistent with check_mail
 dnl and to distinguish users from hosts (com would be host, com@ would be user)
@@ -2394,7 +2396,7 @@ ifdef(`_ACCESS_TABLE_', `',
 `errprint(`*** ERROR: FEATURE(`delay_checks', `argument') requires FEATURE(`access_db')
 ')')dnl
 dnl one of the next two rules is supposed to match
-dnl this code has been copied from BLACKLIST... etc
+dnl this code has been copied from BLOCKLIST... etc
 dnl and simplified by omitting some < >.
 R<?> $+ < @ $=w >	$: <> $1 < @ $2 > $| <F: $1@$2 > <D: $2 > <U: $1@>
 R<?> $+ < @ $* >	$: <> $1 < @ $2 > $| <F: $1@$2 > <D: $2 >
@@ -2696,11 +2698,7 @@ ifdef(`_ACCESS_TABLE_', `dnl
 R$*		$: $>D <$&{server_name}> <?> <! TLS_TRY_TAG> <>
 R<?>$*		$: $>A <$&{server_addr}> <?> <! TLS_TRY_TAG> <>
 R<?>$*		$: <$(access TLS_TRY_TAG`'_TAG_DELIM_ $: ? $)>
-ifdef(`_TLS_FAILURES_', `dnl
-R<?>$*				$: <?> $&{saved_verify} $| $(arith l $@ `'_TLS_FAILURES_CNT_`' $@ $&{ntries} $) $|  $1
-R<?> SOFTWARE $| TRUE $| $*	$#error $@ 5.7.1 $: "550 do not try TLS with " $&{server_name} " ["$&{server_addr}"] due to previous verify=SOFTWARE errors"
-R<?> PROTOCOL $| TRUE $| $*	$#error $@ 5.7.1 $: "550 do not try TLS with " $&{server_name} " ["$&{server_addr}"] due to previous verify=PROTOCOL errors"')
-R<?>$*				$@ OK
+R<?>$*		$@ OK
 ifdef(`_ATMPF_', `dnl tempfail?
 R<$* _ATMPF_>$*	$#error $@ 4.3.0 $: _TMPFMSG_(`TT')', `dnl')
 R<NO>$*		$#error $@ 5.7.1 $: "550 do not try TLS with " $&{server_name} " ["$&{server_addr}"]"')
@@ -2919,10 +2917,10 @@ R $| $+		$@ OK
 dnl require CN: but no CN specified: use name of other side
 R<CN> $* $| <$+>		$: <CN:$&{TLS_Name}> $1 $| <$2>
 ifdef(`_FFR_TLS_ALTNAMES', `dnl
-R<CN:$={cert_altnames}> $* $| <$+>	$@ $>"TLS_req" $3 $| <$3>
+R<CN:$={cert_altnames}> $* $| <$+>	$@ $>"TLS_req" $2 $| <$3>
 R<CN:$-.$+> $* $| <$+>			$: <CN:*.$2> $3 $| <$4>
 R<CN:$={cert_altnames}> $* $| <$+>	$@ $>"TLS_req" $3 $| <$3>
-R<CN:$*> $* $| <$+>			$: <CN:$&{TLS_Name}> $1 $| <$2>', `dnl')
+R<CN:$*> $* $| <$+>			$: <CN:$&{TLS_Name}> $2 $| <$3>', `dnl')
 dnl match, check rest
 R<CN:$&{cn_subject}> $* $| <$+>		$@ $>"TLS_req" $1 $| <$2>
 dnl CN does not match

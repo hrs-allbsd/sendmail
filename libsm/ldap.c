@@ -113,7 +113,7 @@ ldap_debug_cb(msg)
 #  endif /* _FFR_SM_LDAP_DBG && defined(LBER_OPT_LOG_PRINT_FN) */
 
 
-# if _FFR_LDAP_NETWORK_TIMEOUT && defined(LDAP_OPT_NETWORK_TIMEOUT)
+# if LDAP_NETWORK_TIMEOUT && defined(LDAP_OPT_NETWORK_TIMEOUT)
 #  define SET_LDAP_TMO(ld, lmap)					\
 	do								\
 	{								\
@@ -129,9 +129,9 @@ ldap_debug_cb(msg)
 			ldap_set_option(ld, LDAP_OPT_NETWORK_TIMEOUT, &tmo); \
 		}	\
 	} while (0)
-# else /* _FFR_LDAP_NETWORK_TIMEOUT && defined(LDAP_OPT_NETWORK_TIMEOUT) */
+# else /* LDAP_NETWORK_TIMEOUT && defined(LDAP_OPT_NETWORK_TIMEOUT) */
 #  define SET_LDAP_TMO(ld, lmap)
-# endif /* _FFR_LDAP_NETWORK_TIMEOUT && defined(LDAP_OPT_NETWORK_TIMEOUT) */
+# endif /* LDAP_NETWORK_TIMEOUT && defined(LDAP_OPT_NETWORK_TIMEOUT) */
 
 /*
 **  SM_LDAP_SETOPTSG -- set some (global) LDAP options
@@ -255,7 +255,7 @@ sm_ldap_setopts(ld, lmap)
 **		Populates lmap->ldap_ld.
 */
 
-# if !USE_LDAP_INIT || !_FFR_LDAP_NETWORK_TIMEOUT
+# if !USE_LDAP_INIT || !LDAP_NETWORK_TIMEOUT
 static jmp_buf	LDAPTimeout;
 static void	ldaptimeout __P((int));
 
@@ -298,7 +298,7 @@ do									\
 	if (ev != NULL)							\
 		sm_clrevent(ev);					\
 } while (0)
-#endif /* !USE_LDAP_INIT || !_FFR_LDAP_NETWORK_TIMEOUT */
+#endif /* !USE_LDAP_INIT || !LDAP_NETWORK_TIMEOUT */
 
 bool
 sm_ldap_start(name, lmap)
@@ -307,13 +307,13 @@ sm_ldap_start(name, lmap)
 {
 	int save_errno = 0;
 	char *id;
-# if !USE_LDAP_INIT || !_FFR_LDAP_NETWORK_TIMEOUT
+# if !USE_LDAP_INIT || !LDAP_NETWORK_TIMEOUT
 	SM_EVENT *ev = NULL;
 # endif
 	LDAP *ld = NULL;
 	struct timeval tmo;
 	int msgid, err, r;
- 
+
 	if (sm_debug_active(&SmLDAPTrace, 2))
 		sm_dprintf("ldapmap_start(%s)\n", name == NULL ? "" : name);
 
@@ -404,14 +404,14 @@ sm_ldap_start(name, lmap)
 	}
 
 	sm_ldap_setopts(ld, lmap);
-# if USE_LDAP_INIT && !_FFR_LDAP_NETWORK_TIMEOUT
+# if USE_LDAP_INIT && !LDAP_NETWORK_TIMEOUT
 	/*
 	**  If using ldap_init(), the actual connection to the server
 	**  happens at ldap_bind_s() so we need the timeout here.
 	*/
 
 	SM_LDAP_SETTIMEOUT(lmap->ldap_timeout.tv_sec, "ldap_bind");
-# endif /* USE_LDAP_INIT && !_FFR_LDAP_NETWORK_TIMEOUT */
+# endif /* USE_LDAP_INIT && !LDAP_NETWORK_TIMEOUT */
 
 # ifdef LDAP_AUTH_KRBV4
 	if (lmap->ldap_method == LDAP_AUTH_KRBV4 &&
@@ -427,7 +427,7 @@ sm_ldap_start(name, lmap)
 	}
 # endif /* LDAP_AUTH_KRBV4 */
 
-# if _FFR_LDAP_NETWORK_TIMEOUT
+# if LDAP_NETWORK_TIMEOUT
 	tmo.tv_sec = lmap->ldap_networktmo;
 # else
 	tmo.tv_sec = lmap->ldap_timeout.tv_sec;
@@ -441,7 +441,9 @@ sm_ldap_start(name, lmap)
 			lmap->ldap_method);
 	save_errno = errno;
 	if (sm_debug_active(&SmLDAPTrace, 9))
-		sm_dprintf("ldap_bind(%s)=%d, errno=%d, tmo=%ld\n", lmap->ldap_uri, msgid, save_errno, tmo.tv_sec);
+		sm_dprintf("ldap_bind(%s)=%d, errno=%d, tmo=%ld\n",
+			lmap->ldap_uri, msgid, save_errno,
+			(long) tmo.tv_sec);
 	if (-1 == msgid)
 	{
 		r = -1;
@@ -473,12 +475,12 @@ sm_ldap_start(name, lmap)
 		goto fail;
 	}
 
-# if USE_LDAP_INIT && !_FFR_LDAP_NETWORK_TIMEOUT
+# if USE_LDAP_INIT && !LDAP_NETWORK_TIMEOUT
 	/* clear the event if it has not sprung */
 	SM_LDAP_CLEARTIMEOUT();
 	if (sm_debug_active(&SmLDAPTrace, 9))
 		sm_dprintf("ldap_cleartimeout(%s)\n", lmap->ldap_uri);
-# endif /* USE_LDAP_INIT && !_FFR_LDAP_NETWORK_TIMEOUT */
+# endif /* USE_LDAP_INIT && !LDAP_NETWORK_TIMEOUT */
 
 	if (r != LDAP_SUCCESS)
 	{
@@ -505,7 +507,7 @@ sm_ldap_start(name, lmap)
 **	Parameters:
 **		lmap -- LDAP map information
 **		argv -- key vector of substitutions in LDAP filter
-**		        NOTE: argv must have SM_LDAP_ARGS elements to prevent
+**			NOTE: argv must have SM_LDAP_ARGS elements to prevent
 **			      out of bound array references
 **
 **	Returns:

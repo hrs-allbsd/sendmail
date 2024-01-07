@@ -102,12 +102,14 @@ tls_data_md(buf, len, md)
 	return (int)md_len;
 }
 
+#if DANE
+
 /*
 **  PUBKEY_FP -- get public key fingerprint
 **
 **	Parameters:
 **		cert -- TLS cert
-**		md -- digest algorithm
+**		mdalg -- name of digest algorithm
 **		fp -- (pointer to) fingerprint buffer
 **
 **	Returns:
@@ -116,17 +118,18 @@ tls_data_md(buf, len, md)
 */
 
 int
-pubkey_fp(cert, md, fp)
+pubkey_fp(cert, mdalg, fp)
 	X509 *cert;
-	const EVP_MD *md;
+	const char *mdalg;
 	char **fp;
 {
 	int len, r;
 	unsigned char *buf, *end;
+	const EVP_MD *md;
 
 	SM_ASSERT(cert != NULL);
 	SM_ASSERT(fp != NULL);
-	SM_ASSERT(md != NULL);
+	SM_ASSERT(mdalg != NULL);
 
 	len = i2d_X509_PUBKEY(X509_get_X509_PUBKEY(cert), NULL);
 
@@ -138,6 +141,19 @@ pubkey_fp(cert, md, fp)
 	end = buf = sm_malloc(len);
 	if (NULL == buf)
 		return -ENOMEM;
+
+	if ('\0' == mdalg[0])
+	{
+		r = i2d_X509_PUBKEY(X509_get_X509_PUBKEY(cert), &end);
+		if (r <= 0 || r != len)
+			return -EINVAL;
+		*fp = (char *)buf;
+		return len;
+	}
+
+	md = EVP_get_digestbyname(mdalg);
+	if (NULL == md)
+		return DANE_VRFY_FAIL;
 	len = i2d_X509_PUBKEY(X509_get_X509_PUBKEY(cert), &end);
 	r = tls_data_md(buf, len, md);
 	if (r < 0)
@@ -147,15 +163,13 @@ pubkey_fp(cert, md, fp)
 	return r;
 }
 
-#if _FFR_TLSA_DANE
-
 /*
-**  DANE_TLSA_CHK -- check whether TLSA RRs are ok to use
+**  DANE_TLSA_CHK -- check whether a TLSA RR is ok to use
 **
 **	Parameters:
 **		rr -- RR
 **		len -- length of RR
-**		host -- name of host for RR
+**		host -- name of host for RR (only for logging)
 **		log -- whether to log problems
 **
 **	Returns:
@@ -169,6 +183,7 @@ dane_tlsa_chk(rr, len, host, log)
 	const char *host;
 	bool log;
 {
+	int alg;
 
 	if (len < 4)
 	{
@@ -178,19 +193,17 @@ dane_tlsa_chk(rr, len, host, log)
 				  host, len);
 		return TLSA_BOGUS;
 	}
+	SM_ASSERT(rr != NULL);
 
-	/* ignore TLSA RRs which we do not handle right now */
-	if ((int)rr[0] != 3 || (int)rr[1] != 1 || (int)rr[2] != 1)
-	{
-		if (log && LogLevel > 9)
-			sm_syslog(LOG_NOTICE, NOQID,
-				  "TLSA=%s, type=%d-%d-%d:%02x, status=unsupported",
-				  host,
-				  (int)rr[0], (int)rr[1], (int)rr[2],
-				  (int)rr[3]);
-		return TLSA_UNSUPP;
-	}
-	return TLSA_OK;
+	alg = (int)rr[2];
+	if ((int)rr[0] == 3 && (int)rr[1] == 1 && (alg >= 0 || alg <= 2))
+		return alg;
+	if (log && LogLevel > 9)
+		sm_syslog(LOG_NOTICE, NOQID,
+			  "TLSA=%s, type=%d-%d-%d:%02x, status=unsupported",
+			  host, (int)rr[0], (int)rr[1], (int)rr[2],
+			  (int)rr[3]);
+	return TLSA_UNSUPP;
 }
 
 /*
@@ -217,8 +230,8 @@ dane_tlsa_clr(dane_tlsa)
 		SM_FREE(dane_tlsa->dane_tlsa_rr[i]);
 		dane_tlsa->dane_tlsa_len[i] = 0;
 	}
-	dane_tlsa->dane_tlsa_exp = 0;
-	dane_tlsa->dane_tlsa_n = 0;
+	SM_FREE(dane_tlsa->dane_tlsa_sni);
+	memset(dane_tlsa, '\0', sizeof(*dane_tlsa));
 	return 0;
 
 }
@@ -230,8 +243,8 @@ dane_tlsa_clr(dane_tlsa)
 **		dane_tlsa -- dane_tlsa to free
 **
 **	Returns:
-**		1 if NULL
 **		0 if ok
+**		1 if NULL
 */
 
 int
@@ -245,6 +258,6 @@ dane_tlsa_free(dane_tlsa)
 	return 0;
 
 }
-#endif /* _FFR_TLSA_DANE */
+#endif /* DANE */
 
 #endif /* STARTTLS */

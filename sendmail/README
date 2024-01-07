@@ -137,7 +137,7 @@ PH_MAP		PH map support.  You will need the libphclient library from
 		the nph package (http://www-dev.cites.uiuc.edu/ph/nph/).
 MAP_NSD		nsd map support (IRIX 6.5 and later).
 SOCKETMAP	Support for a trivial query protocol over UNIX domain or TCP
-		sockets. 
+		sockets.
 
 >>>  NOTE WELL for NEWDB support: If you want to get ndbm support, for
 >>>  Berkeley DB versions under 2.0, it is CRITICAL that you remove
@@ -300,6 +300,8 @@ HASULIMIT	Define this if you have the ulimit(2) syscall (System V
 HASWAITPID	Define this if you have the waitpid(2) syscall.
 HASGETDTABLESIZE
 		Define this if you have the getdtablesize(2) syscall.
+HAS_GETHOSTBYNAME2	Define this to 1 if your system supports
+		gethostbyname2(2).
 HAS_ST_GEN	Define this to 1 if your system has the st_gen field in
 		the stat structure (see stat(2)).
 HASSRANDOMDEV	Define this if your system has the srandomdev(3) function

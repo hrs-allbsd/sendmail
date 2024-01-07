@@ -16,8 +16,8 @@
 #####
 #####		SENDMAIL CONFIGURATION FILE
 #####
-##### built by xbuild@xenon13-01.eng.proofpoint.com on Fri Feb 15 02:31:46 PST 2019
-##### in /export/jenkins/jenkins1/workspace/pps-sendmail/OpenSource/sendmail-8.16.0.41/cf/cf
+##### built by ca@lab.smi.sendmail.com on Thu Jul 2 22:41:56 PDT 2020
+##### in /var/tmp/ca/sm8.git/sendmail/OpenSource/sendmail-8.16.1/cf/cf
 ##### using ../ as configuration include directory
 #####
 ######################################################################
@@ -122,7 +122,7 @@ DnMAILER-DAEMON
 CPREDIRECT
 
 # Configuration version number
-DZ8.16.0.41
+DZ8.16.1
 
 
 ###############
@@ -554,6 +554,8 @@ O MaxHeadersLength=32768
 #O RandFile
 # fingerprint algorithm (digest) to use for the presented cert
 #O CertFingerprintAlgorithm
+# enable DANE?
+#O DANE=false
 
 # Maximum number of "useless" commands before slowing down
 #O MaxNOOPCommands=20

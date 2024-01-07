@@ -19,7 +19,7 @@ SM_RCSID("@(#)$Id: sfsasl.c,v 8.121 2013-11-22 20:51:56 ca Exp $")
 /* allow to disable error handling code just in case... */
 #ifndef DEAL_WITH_ERROR_SSL
 # define DEAL_WITH_ERROR_SSL	1
-#endif /* ! DEAL_WITH_ERROR_SSL */
+#endif
 
 #if SASL
 # include "sfsasl.h"
@@ -193,9 +193,9 @@ sasl_read(fp, buf, size)
 	ssize_t len;
 # if SASL >= 20000
 	static const char *outbuf = NULL;
-# else /* SASL >= 20000 */
+# else
 	static char *outbuf = NULL;
-# endif /* SASL >= 20000 */
+# endif
 	static unsigned int outlen = 0;
 	static unsigned int offset = 0;
 	struct sasl_obj *so = (struct sasl_obj *) fp->f_cookie;
@@ -214,9 +214,9 @@ sasl_read(fp, buf, size)
 
 # if SASL >= 20000
 	while (outlen == 0)
-# else /* SASL >= 20000 */
+# else
 	while (outbuf == NULL && outlen == 0)
-# endif /* SASL >= 20000 */
+# endif
 	{
 		len = sm_io_read(so->fp, SM_TIME_DEFAULT, buf, size);
 		if (len <= 0)
@@ -255,7 +255,7 @@ sasl_read(fp, buf, size)
 		(void) memcpy(buf, outbuf + offset, (size_t) len);
 # if SASL < 20000
 		SASL_DEALLOC(outbuf);
-# endif /* SASL < 20000 */
+# endif
 		outbuf = NULL;
 		offset = 0;
 		outlen = 0;
@@ -287,9 +287,9 @@ sasl_write(fp, buf, size)
 	int result;
 # if SASL >= 20000
 	const char *outbuf;
-# else /* SASL >= 20000 */
+# else
 	char *outbuf;
-# endif /* SASL >= 20000 */
+# endif
 	unsigned int outlen, *maxencode;
 	size_t ret = 0, total = 0;
 	struct sasl_obj *so = (struct sasl_obj *) fp->f_cookie;
@@ -339,7 +339,7 @@ sasl_write(fp, buf, size)
 		}
 # if SASL < 20000
 		SASL_DEALLOC(outbuf);
-# endif /* SASL < 20000 */
+# endif
 	}
 	return size;
 }
@@ -674,9 +674,9 @@ tls_retry(ssl, rfd, wfd, tlsstart, timeout, err, where)
 /* errno to force refill() etc to stop (see IS_IO_ERROR()) */
 #ifdef ETIMEDOUT
 # define SM_ERR_TIMEOUT	ETIMEDOUT
-#else /* ETIMEDOUT */
+#else
 # define SM_ERR_TIMEOUT	EIO
-#endif /* ETIMEDOUT */
+#endif
 
 /*
 **  SET_TLS_RD_TMO -- read secured information for the caller
@@ -768,15 +768,12 @@ tls_read(fp, buf, size)
 		if (r == 0 && errno == 0) /* out of protocol EOF found */
 			break;
 		err = "syscall error";
-/*
-		get_last_socket_error());
-*/
 		break;
 	  case SSL_ERROR_SSL:
 #if DEAL_WITH_ERROR_SSL
 		if (r == 0 && errno == 0) /* out of protocol EOF found */
 			break;
-#endif /* DEAL_WITH_ERROR_SSL */
+#endif
 		err = "generic SSL error";
 
 		if (LogLevel > 9)
@@ -794,7 +791,7 @@ tls_read(fp, buf, size)
 		/* avoid repeated calls? */
 		if (r == 0)
 			r = -1;
-#endif /* DEAL_WITH_ERROR_SSL */
+#endif
 		break;
 	}
 	if (err != NULL)
@@ -893,9 +890,6 @@ tls_write(fp, buf, size)
 		if (r == 0 && errno == 0) /* out of protocol EOF found */
 			break;
 		err = "syscall error";
-/*
-		get_last_socket_error());
-*/
 		break;
 	  case SSL_ERROR_SSL:
 		err = "generic SSL error";
@@ -908,7 +902,7 @@ tls_write(fp, buf, size)
 		/* avoid repeated calls? */
 		if (r == 0)
 			r = -1;
-#endif /* DEAL_WITH_ERROR_SSL */
+#endif
 		break;
 	}
 	if (err != NULL)

@@ -27,7 +27,7 @@ static bool	smdb_lockfile __P((int, int));
 **		None
 **
 **	Returns:
-**		An pointer to an allocated SMDB_DATABASE structure or
+**		A pointer to an allocated SMDB_DATABASE structure or
 **		NULL if it couldn't allocate the memory.
 */
 
@@ -160,12 +160,11 @@ smdb_lockfile(fd, type)
 **  SMDB_OPEN_DATABASE -- Opens a database.
 **
 **	This opens a database. If type is SMDB_DEFAULT it tries to
-**	use a DB1 or DB2 hash. If that isn't available, it will try
-**	to use NDBM. If a specific type is given it will try to open
-**	a database of that type.
+**	use available DB types.  If a specific type is given it will
+**	try to open a database of that type.
 **
 **	Parameters:
-**		database -- An pointer to a SMDB_DATABASE pointer where the
+**		database -- A pointer to a SMDB_DATABASE pointer where the
 **			   opened database will be stored. This should
 **			   be unallocated.
 **		db_name -- The name of the database to open. Do not include

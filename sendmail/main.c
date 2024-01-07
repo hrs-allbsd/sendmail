@@ -32,6 +32,9 @@ SM_RCSID("@(#)$Id: main.c,v 8.988 2013-11-23 02:52:37 gshapiro Exp $")
 
 #if NETINET || NETINET6
 # include <arpa/inet.h>
+# if DANE
+#  include "sm_resolve.h"
+# endif
 #endif
 
 /* for getcfname() */
@@ -280,11 +283,11 @@ main(argc, argv, envp)
 # ifndef SM_LOG_STR
 #  define SM_LOG_STR	"sendmail"
 # endif
-#  ifdef LOG_MAIL
+# ifdef LOG_MAIL
 	openlog(SM_LOG_STR, LOG_PID, LOG_MAIL);
-#  else
+# else
 	openlog(SM_LOG_STR, LOG_PID);
-#  endif
+# endif
 #endif /* LOG */
 
 	/*
@@ -509,11 +512,11 @@ main(argc, argv, envp)
 				*p = '*';
 		}
 		closelog();
-#  ifdef LOG_MAIL
+# ifdef LOG_MAIL
 		openlog(sysloglabel, LOG_PID, LOG_MAIL);
-#  else
+# else
 		openlog(sysloglabel, LOG_PID);
-#  endif
+# endif
 	}
 #endif /* LOG */
 
@@ -1346,12 +1349,6 @@ main(argc, argv, envp)
 		(void) sm_signal(SIGINT, intsig);
 	(void) sm_signal(SIGTERM, intsig);
 
-#if _FFR_TLSA_DANE
-	/* Turn on necessary resolver options for DANE */
-	if (Dane != DANE_NEVER)
-		_res.options |= RES_USE_EDNS0|RES_USE_DNSSEC;
-#endif
-
 	/* Enforce use of local time (null string overrides this) */
 	if (TimeZoneSpec == NULL)
 		unsetenv("TZ");
@@ -1862,6 +1859,9 @@ main(argc, argv, envp)
 
 	/* MIME message/xxx subtypes that can be treated as messages */
 	setclass('s', "rfc822");
+#if _FFR_EAI
+	setclass('s', "global");
+#endif
 
 	/* MIME Content-Transfer-Encodings that can be encoded */
 	setclass('e', "7bit");
@@ -2303,7 +2303,7 @@ main(argc, argv, envp)
 		/* NOTREACHED */
 	}
 
-# if SASL
+#if SASL
 	if (OpMode == MD_SMTP || OpMode == MD_DAEMON)
 	{
 		/* check whether AUTH is turned off for the server */
@@ -2312,7 +2312,7 @@ main(argc, argv, envp)
 			syserr("!sasl_server_init failed! [%s]",
 				sasl_errstring(i, NULL, NULL));
 	}
-# endif /* SASL */
+#endif /* SASL */
 
 	if (OpMode == MD_SMTP)
 	{
@@ -3363,7 +3363,8 @@ disconnect(droplev, e)
 	if (tTd(52, 1))
 		sm_dprintf("disconnect: In %d Out %d, e=%p\n",
 			   sm_io_getinfo(InChannel, SM_IO_WHAT_FD, NULL),
-			   sm_io_getinfo(OutChannel, SM_IO_WHAT_FD, NULL), e);
+			   sm_io_getinfo(OutChannel, SM_IO_WHAT_FD, NULL),
+			   (void *)e);
 	if (tTd(52, 100))
 	{
 		sm_dprintf("don't\n");
@@ -4186,10 +4187,10 @@ testmodeline(line, e)
 				register char *wd;
 				char delim;
 
-				while (*p != '\0' && isascii(*p) && isspace(*p))
+				while (*p != '\0' && SM_ISSPACE(*p))
 					p++;
 				wd = p;
-				while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+				while (*p != '\0' && !(SM_ISSPACE(*p)))
 					p++;
 				delim = *p;
 				*p = '\0';
@@ -4316,12 +4317,12 @@ testmodeline(line, e)
 
 	  case '/':		/* miscellaneous commands */
 		p = &line[strlen(line)];
-		while (--p >= line && isascii(*p) && isspace(*p))
+		while (--p >= line && SM_ISSPACE(*p))
 			*p = '\0';
 		p = strpbrk(line, " \t");
 		if (p != NULL)
 		{
-			while (isascii(*p) && isspace(*p))
+			while (SM_ISSPACE(*p))
 				*p++ = '\0';
 		}
 		else
@@ -4353,10 +4354,15 @@ testmodeline(line, e)
 				return;
 			}
 			nmx = getmxrr(p, mxhosts, NULL, TRYFALLBACK, &rcode,
-				      NULL);
-			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
-					     "getmxrr(%s) returns %d value(s):\n",
-				p, nmx);
+				      NULL, -1);
+			if (nmx == NULLMX)
+				(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
+						     "getmxrr(%s) returns null MX (See RFC7505)\n",
+						     p);
+			else
+				(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
+						     "getmxrr(%s) returns %d value(s):\n",
+						     p, nmx);
 			for (i = 0; i < nmx; i++)
 				(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
 						     "\t%s\n", mxhosts[i]);
@@ -4398,7 +4404,7 @@ testmodeline(line, e)
 						     "Usage: /map mapname key\n");
 				return;
 			}
-			for (q = p; *q != '\0' && !(isascii(*q) && isspace(*q));			     q++)
+			for (q = p; *q != '\0' && !(SM_ISSPACE(*q)); q++)
 				continue;
 			if (*q == '\0')
 			{
@@ -4445,7 +4451,7 @@ testmodeline(line, e)
 			q = strpbrk(p, " \t");
 			if (q != NULL)
 			{
-				while (isascii(*q) && isspace(*q))
+				while (SM_ISSPACE(*q))
 					*q++ = '\0';
 			}
 			if (q == NULL || *q == '\0')
@@ -4565,7 +4571,7 @@ testmodeline(line, e)
 			q = strpbrk(p, " \t");
 			if (q != NULL)
 			{
-				while (isascii(*q) && isspace(*q))
+				while (SM_ISSPACE(*q))
 					*q++ = '\0';
 # if NETINET6
 				if (*q != '\0' && (strcmp(q, "inet6") == 0 ||
@@ -4576,6 +4582,58 @@ testmodeline(line, e)
 			(void) sm_gethostbyname(p, family);
 		}
 #endif /* NETINET || NETINET6 */
+#if DANE
+		else if (sm_strcasecmp(&line[1], "dnslookup") == 0)
+		{
+			DNS_REPLY_T *r;
+			int rr_type, family;
+			unsigned int flags;
+
+			rr_type = T_A;
+			family = AF_INET;
+			flags = RR_AS_TEXT;
+			q = strpbrk(p, " \t");
+			if (q != NULL)
+			{
+				char *pflags;
+
+				while (SM_ISSPACE(*q))
+					*q++ = '\0';
+				pflags = strpbrk(q, " \t");
+				if (pflags != NULL)
+				{
+					while (SM_ISSPACE(*pflags))
+						*pflags++ = '\0';
+				}
+				rr_type = dns_string_to_type(q);
+				if (rr_type == T_A)
+					family = AF_INET;
+# if NETINET6
+				if (rr_type == T_AAAA)
+					family = AF_INET6;
+# endif
+				while (pflags != NULL && *pflags != '\0' &&
+					!SM_ISSPACE(*pflags))
+				{
+					if (*pflags == 'c')
+						flags |= RR_NO_CNAME;
+					else if (*pflags == 'o')
+						flags |= RR_ONLY_CNAME;
+					else if (*pflags == 'T')
+						flags &= ~RR_AS_TEXT;
+					++pflags;
+				}
+			}
+			r = dns_lookup_int(p, C_IN, rr_type,
+					0, 0, 0, flags, NULL, NULL);
+			if (r != NULL && family >= 0)
+			{
+				(void) dns2he(r, family);
+				dns_free_data(r);
+				r = NULL;
+			}
+		}
+#endif /* DANE */
 		else
 		{
 			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
@@ -4586,10 +4644,10 @@ testmodeline(line, e)
 		return;
 	}
 
-	for (p = line; isascii(*p) && isspace(*p); p++)
+	for (p = line; SM_ISSPACE(*p); p++)
 		continue;
 	q = p;
-	while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+	while (*p != '\0' && !(SM_ISSPACE(*p)))
 		p++;
 	if (*p == '\0')
 	{

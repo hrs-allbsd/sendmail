@@ -78,55 +78,55 @@ db2_error_to_smdb(error)
 		case DB_INCOMPLETE:
 			result = SMDBE_INCOMPLETE;
 			break;
-# endif /* DB_INCOMPLETE */
+# endif
 
 # ifdef DB_NOTFOUND
 		case DB_NOTFOUND:
 			result = SMDBE_NOT_FOUND;
 			break;
-# endif /* DB_NOTFOUND */
+# endif
 
 # ifdef DB_KEYEMPTY
 		case DB_KEYEMPTY:
 			result = SMDBE_KEY_EMPTY;
 			break;
-# endif /* DB_KEYEMPTY */
+# endif
 
 # ifdef DB_KEYEXIST
 		case DB_KEYEXIST:
 			result = SMDBE_KEY_EXIST;
 			break;
-# endif /* DB_KEYEXIST */
+# endif
 
 # ifdef DB_LOCK_DEADLOCK
 		case DB_LOCK_DEADLOCK:
 			result = SMDBE_LOCK_DEADLOCK;
 			break;
-# endif /* DB_LOCK_DEADLOCK */
+# endif
 
 # ifdef DB_LOCK_NOTGRANTED
 		case DB_LOCK_NOTGRANTED:
 			result = SMDBE_LOCK_NOT_GRANTED;
 			break;
-# endif /* DB_LOCK_NOTGRANTED */
+# endif
 
 # ifdef DB_LOCK_NOTHELD
 		case DB_LOCK_NOTHELD:
 			result = SMDBE_LOCK_NOT_HELD;
 			break;
-# endif /* DB_LOCK_NOTHELD */
+# endif
 
 # ifdef DB_RUNRECOVERY
 		case DB_RUNRECOVERY:
 			result = SMDBE_RUN_RECOVERY;
 			break;
-# endif /* DB_RUNRECOVERY */
+# endif
 
 # ifdef DB_OLD_VERSION
 		case DB_OLD_VERSION:
 			result = SMDBE_OLD_VERSION;
 			break;
-# endif /* DB_OLD_VERSION */
+# endif
 
 		case 0:
 			result = SMDBE_OK;
@@ -428,9 +428,9 @@ smdb2_cursor(database, cursor, flags)
 
 # if DB_VERSION_MAJOR > 2 || DB_VERSION_MINOR >= 6
 	result = db->cursor(db, NULL, &db2_cursor, 0);
-# else /* DB_VERSION_MAJOR > 2 || DB_VERSION_MINOR >= 6 */
+# else
 	result = db->cursor(db, NULL, &db2_cursor);
-# endif /* DB_VERSION_MAJOR > 2 || DB_VERSION_MINOR >= 6 */
+# endif
 	if (result != 0)
 		return db2_error_to_smdb(result);
 

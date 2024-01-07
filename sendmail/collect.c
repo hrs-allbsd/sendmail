@@ -303,7 +303,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 	char bufbuf[MAXLINE];
 #if _FFR_REJECT_NUL_BYTE
 	bool hasNUL;		/* has at least one NUL input byte */
-#endif /* _FFR_REJECT_NUL_BYTE */
+#endif
 
 	df = NULL;
 	ignrdot = smtpmode ? false : IgnrDot;
@@ -321,7 +321,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 	HasEightBits = false;
 #if _FFR_REJECT_NUL_BYTE
 	hasNUL = false;
-#endif /* _FFR_REJECT_NUL_BYTE */
+#endif
 	buf = bp = bufbuf;
 	buflen = sizeof(bufbuf);
 	pbp = peekbuf;
@@ -413,7 +413,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 #if _FFR_REJECT_NUL_BYTE
 				if (c == '\0')
 					hasNUL = true;
-#endif /* _FFR_REJECT_NUL_BYTE */
+#endif
 				if (c == SM_IO_EOF)
 					goto readerr;
 				if (SevenBitInput)
@@ -976,9 +976,9 @@ dferror(df, msg, e)
 	{
 #if STAT64 > 0
 		struct stat64 st;
-#else /* STAT64 > 0 */
+#else
 		struct stat st;
-#endif /* STAT64 > 0 */
+#endif
 		long avail;
 		long bsize;
 
@@ -987,9 +987,9 @@ dferror(df, msg, e)
 		if (
 #if STAT64 > 0
 		    fstat64(sm_io_getinfo(df, SM_IO_WHAT_FD, NULL), &st)
-#else /* STAT64 > 0 */
+#else
 		    fstat(sm_io_getinfo(df, SM_IO_WHAT_FD, NULL), &st)
-#endif /* STAT64 > 0 */
+#endif
 		    < 0)
 		  st.st_size = 0;
 		(void) sm_io_reopen(SmFtStdio, SM_TIME_DEFAULT, dfname,

@@ -17,7 +17,7 @@ SM_RCSID("@(#)$Id: mci.c,v 8.225 2013-11-22 20:51:56 ca Exp $")
 
 #if NETINET || NETINET6
 # include <arpa/inet.h>
-#endif /* NETINET || NETINET6 */
+#endif
 
 #include <dirent.h>
 #if STARTTLS
@@ -106,7 +106,7 @@ mci_cache(mci)
 
 	if (tTd(42, 5))
 		sm_dprintf("mci_cache: caching %p (%s) in slot %d\n",
-			   mci, mci->mci_host, (int) (mcislot - MciCache));
+			(void *)mci, mci->mci_host, (int) (mcislot - MciCache));
 	if (tTd(91, 100))
 		sm_syslog(LOG_DEBUG, CurEnv->e_id,
 			  "mci_cache: caching %lx (%.100s) in slot %d",
@@ -213,7 +213,7 @@ mci_uncache(mcislot, doquit)
 
 	if (tTd(42, 5))
 		sm_dprintf("mci_uncache: uncaching %p (%s) from slot %d (%d)\n",
-			   mci, mci->mci_host, (int) (mcislot - MciCache),
+			(void *)mci, mci->mci_host, (int) (mcislot - MciCache),
 			   doquit);
 	if (tTd(91, 100))
 		sm_syslog(LOG_DEBUG, CurEnv->e_id,
@@ -233,7 +233,7 @@ mci_uncache(mcislot, doquit)
 			smtpquit(mci->mci_mailer, mci, &BlankEnvelope);
 #if XLA
 		xla_host_end(mci->mci_host);
-#endif /* XLA */
+#endif
 	}
 	else
 	{
@@ -251,12 +251,12 @@ mci_uncache(mcislot, doquit)
 		mci->mci_tolist = NULL;
 #if PIPELINING
 		mci->mci_okrcpts = 0;
-#endif /* PIPELINING */
+#endif
 	}
 
-	SM_FREE_CLR(mci->mci_status);
-	SM_FREE_CLR(mci->mci_rstatus);
-	SM_FREE_CLR(mci->mci_heloname);
+	SM_FREE(mci->mci_status);
+	SM_FREE(mci->mci_rstatus);
+	SM_FREE(mci->mci_heloname);
 	mci_clear(mci);
 	if (mci->mci_rpool != NULL)
 	{
@@ -316,7 +316,7 @@ mci_clr_extensions(mci)
 	mci->mci_min_by = 0;
 #if SASL
 	mci->mci_saslcap = NULL;
-#endif /* SASL */
+#endif
 }
 
 /*
@@ -391,7 +391,7 @@ mci_get(host, m)
 	mci->mci_tolist = NULL;
 #if PIPELINING
 	mci->mci_okrcpts = 0;
-#endif /* PIPELINING */
+#endif
 	mci->mci_flags &= ~MCIF_NOTSTICKY;
 
 	if (mci->mci_rpool == NULL)
@@ -592,11 +592,11 @@ mci_setstat(mci, xstat, dstat, rstat)
 	if (xstat != EX_NOTSTICKY && xstat != EX_PROTOCOL)
 		mci->mci_exitstat = xstat;
 
-	SM_FREE_CLR(mci->mci_status);
+	SM_FREE(mci->mci_status);
 	if (dstat != NULL)
 		mci->mci_status = sm_strdup_x(dstat);
 
-	SM_FREE_CLR(mci->mci_rstatus);
+	SM_FREE(mci->mci_rstatus);
 	if (rstat != NULL)
 		mci->mci_rstatus = sm_strdup_x(rstat);
 }
@@ -642,7 +642,7 @@ static struct mcifbits	MciFlags[] =
 #if STARTTLS
 	{ MCIF_TLS,		"TLS"		},
 	{ MCIF_TLSACT,		"TLSACT"	},
-#endif /* STARTTLS */
+#endif
 	{ MCIF_DLVR_BY,		"DLVR_BY"	},
 	{ MCIF_INLONGLINE,	"INLONGLINE"	},
 	{ MCIF_NOTSTICKY,	"NOTSTICKY"	},
@@ -661,7 +661,7 @@ mci_dump(fp, mci, logit)
 
 	sep = logit ? " " : "\n\t";
 	p = buf;
-	(void) sm_snprintf(p, SPACELEFT(buf, p), "MCI@%p: ", mci);
+	(void) sm_snprintf(p, SPACELEFT(buf, p), "MCI@%p: ", (void *)mci);
 	p += strlen(p);
 	if (mci == NULL)
 	{
@@ -1010,8 +1010,8 @@ mci_read_persistent(fp, mci)
 			   (unsigned long) fp);
 	}
 
-	SM_FREE_CLR(mci->mci_status);
-	SM_FREE_CLR(mci->mci_rstatus);
+	SM_FREE(mci->mci_status);
+	SM_FREE(mci->mci_rstatus);
 
 	sm_io_rewind(fp, SM_TIME_DEFAULT);
 	ver = -1;
@@ -1120,7 +1120,7 @@ mci_store_persistent(mci)
 #if !NOFTRUNCATE
 	(void) ftruncate(sm_io_getinfo(mci->mci_statfile, SM_IO_WHAT_FD, NULL),
 			 (off_t) 0);
-#endif /* !NOFTRUNCATE */
+#endif
 
 	(void) sm_io_fprintf(mci->mci_statfile, SM_TIME_DEFAULT, "V0\n");
 	(void) sm_io_fprintf(mci->mci_statfile, SM_TIME_DEFAULT, "E%d\n",
@@ -1205,7 +1205,7 @@ mci_traverse_persistent(action, pathname)
 		char newpath[MAXPATHLEN];
 #if MAXPATHLEN <= MAXNAMLEN - 3
  ERROR "MAXPATHLEN <= MAXNAMLEN - 3"
-#endif /* MAXPATHLEN  <= MAXNAMLEN - 3 */
+#endif
 
 		if ((d = opendir(pathname)) == NULL)
 		{
@@ -1545,7 +1545,7 @@ mci_generate_persistent_path(host, path, pathlen, createflag)
 	char t_host[MAXHOSTNAMELEN];
 #if NETINET6
 	struct in6_addr in6_addr;
-#endif /* NETINET6 */
+#endif
 
 	/*
 	**  Rationality check the arguments.
@@ -1593,11 +1593,11 @@ mci_generate_persistent_path(host, path, pathlen, createflag)
 # if NETINET6
 		if (anynet_pton(AF_INET6, t_host, &in6_addr) == 1)
 			good = true;
-# endif /* NETINET6 */
+# endif
 # if NETINET
 		if (inet_addr(t_host) != INADDR_NONE)
 			good = true;
-# endif /* NETINET */
+# endif
 		if (!good)
 			return -1;
 	}

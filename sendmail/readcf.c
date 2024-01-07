@@ -24,7 +24,7 @@ SM_RCSID("@(#)$Id: readcf.c,v 8.692 2013-11-22 20:51:56 ca Exp $")
 
 #if NETINET || NETINET6
 # include <arpa/inet.h>
-#endif /* NETINET || NETINET6 */
+#endif
 
 
 #define SECONDS
@@ -165,22 +165,6 @@ readcf(cfname, safe, e)
 	FileName = cfname;
 	LineNumber = 0;
 
-#if STARTTLS
-	Srv_SSL_Options = SSL_OP_ALL;
-	Clt_SSL_Options = SSL_OP_ALL
-# ifdef SSL_OP_NO_SSLv2
-		| SSL_OP_NO_SSLv2
-# endif
-# ifdef SSL_OP_NO_TICKET
-		| SSL_OP_NO_TICKET
-# endif
-		;
-# ifdef SSL_OP_TLSEXT_PADDING
-	/* SSL_OP_TLSEXT_PADDING breaks compatibility with some sites */
-	Srv_SSL_Options &= ~SSL_OP_TLSEXT_PADDING;
-	Clt_SSL_Options &= ~SSL_OP_TLSEXT_PADDING;
-# endif /* SSL_OP_TLSEXT_PADDING */
-#endif /* STARTTLS */
 	if (DontLockReadFiles)
 		sff |= SFF_NOLOCK;
 	cf = safefopen(cfname, O_RDONLY, 0444, sff);
@@ -216,7 +200,7 @@ readcf(cfname, safe, e)
 
 #if XLA
 	xla_zero();
-#endif /* XLA */
+#endif
 
 	while (bufsize = sizeof(buf),
 	       (bp = fgetfolded(buf, &bufsize, cf)) != NULL)
@@ -373,7 +357,7 @@ readcf(cfname, safe, e)
 				int args, endtoken;
 #if _FFR_EXTRA_MAP_CHECK
 				int nexttoken;
-#endif /* _FFR_EXTRA_MAP_CHECK */
+#endif
 				bool inmap;
 
 				rwp->r_rhs = copyplist(rwp->r_rhs, true, NULL);
@@ -575,10 +559,10 @@ readcf(cfname, safe, e)
 				register char *wd;
 				char delim;
 
-				while (*p != '\0' && isascii(*p) && isspace(*p))
+				while (*p != '\0' && SM_ISSPACE(*p))
 					p++;
 				wd = p;
-				while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+				while (*p != '\0' && !(SM_ISSPACE(*p)))
 					p++;
 				delim = *p;
 				*p = '\0';
@@ -592,15 +576,15 @@ readcf(cfname, safe, e)
 			mid = macid_parse(&bp[1], &ep);
 			if (mid == 0)
 				break;
-			for (p = ep; isascii(*p) && isspace(*p); )
+			for (p = ep; SM_ISSPACE(*p); )
 				p++;
 			if (p[0] == '-' && p[1] == 'o')
 			{
 				optional = true;
 				while (*p != '\0' &&
-				       !(isascii(*p) && isspace(*p)))
+				       !(SM_ISSPACE(*p)))
 					p++;
-				while (isascii(*p) && isspace(*p))
+				while (SM_ISSPACE(*p))
 					p++;
 			}
 			else
@@ -657,7 +641,7 @@ readcf(cfname, safe, e)
 		  case 'L':		/* extended load average description */
 			xla_init(&bp[1]);
 			break;
-#endif /* XLA */
+#endif
 
 #if defined(SUN_EXTENSIONS) && defined(SUN_LOOKUP_MACRO)
 		  case 'L':		/* lookup macro */
@@ -698,7 +682,7 @@ readcf(cfname, safe, e)
 			break;
 
 		  case 'V':		/* configuration syntax version */
-			for (p = &bp[1]; isascii(*p) && isspace(*p); p++)
+			for (p = &bp[1]; SM_ISSPACE(*p); p++)
 				continue;
 			if (!isascii(*p) || !isdigit(*p))
 			{
@@ -871,7 +855,7 @@ translate_dollars(ibp, obp, bsp)
 
 			  default:
 				/* delete leading white space */
-				while (isascii(*p) && isspace(*p) &&
+				while (SM_ISSPACE(*p) &&
 				       *p != '\n' && p > bp)
 				{
 					p--;
@@ -909,7 +893,7 @@ translate_dollars(ibp, obp, bsp)
 	}
 
 	/* strip trailing white space from the line */
-	while (--p > bp && isascii(*p) && isspace(*p))
+	while (--p > bp && SM_ISSPACE(*p))
 		*p = '\0';
 
 	if (tTd(37, 53))
@@ -976,14 +960,14 @@ parse_class_words(class, line)
 		register char *q;
 
 		/* strip leading spaces */
-		while (isascii(*line) && isspace(*line))
+		while (SM_ISSPACE(*line))
 			line++;
 		if (*line == '\0')
 			break;
 
 		/* find the end of the word */
 		q = line;
-		while (*line != '\0' && !(isascii(*line) && isspace(*line)))
+		while (*line != '\0' && !(SM_ISSPACE(*line)))
 			line++;
 		if (*line != '\0')
 			*line++ = '\0';
@@ -1206,7 +1190,7 @@ fileclass(class, filename, fmt, ismap, safe, optional)
 	{
 #if SCANF
 		char wordbuf[MAXLINE + 1];
-#endif /* SCANF */
+#endif
 
 		if (buf[0] == '#')
 			continue;
@@ -1403,7 +1387,7 @@ makemailer(line)
 
 	/* collect the mailer name */
 	for (p = line;
-	     *p != '\0' && *p != ',' && !(isascii(*p) && isspace(*p));
+	     *p != '\0' && *p != ',' && !(SM_ISSPACE(*p));
 	     p++)
 		continue;
 	if (*p != '\0')
@@ -1427,7 +1411,7 @@ makemailer(line)
 		auto char *delimptr;
 
 		while (*p != '\0' &&
-		       (*p == ',' || (isascii(*p) && isspace(*p))))
+		       (*p == ',' || (SM_ISSPACE(*p))))
 			p++;
 
 		/* p now points to field code */
@@ -1439,7 +1423,7 @@ makemailer(line)
 			syserr("mailer %s: `=' expected", m->m_name);
 			return;
 		}
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 
 		/* p now points to the field body */
@@ -1456,7 +1440,7 @@ makemailer(line)
 		  case 'F':		/* flags */
 			for (; *p != '\0'; p++)
 			{
-				if (!(isascii(*p) && isspace(*p)))
+				if (!(SM_ISSPACE(*p)))
 				{
 					if (*p == M_INTERNAL)
 						sm_syslog(LOG_WARNING, NOQID,
@@ -1595,11 +1579,11 @@ makemailer(line)
 				while (*p != '\0' && isascii(*p) &&
 # if _FFR_DOTTED_USERNAMES
 				       (isalnum(*p) || strchr(SM_PWN_CHARS, *p) != NULL))
-# else /* _FFR_DOTTED_USERNAMES */
+# else
 				       (isalnum(*p) || strchr("-_", *p) != NULL))
-# endif /* _FFR_DOTTED_USERNAMES */
+# endif
 					p++;
-				while (isascii(*p) && isspace(*p))
+				while (SM_ISSPACE(*p))
 					*p++ = '\0';
 				if (*p != '\0')
 					*p++ = '\0';
@@ -1627,12 +1611,12 @@ makemailer(line)
 
 				m->m_uid = strtol(p, &q, 0);
 				p = q;
-				while (isascii(*p) && isspace(*p))
+				while (SM_ISSPACE(*p))
 					p++;
 				if (*p != '\0')
 					p++;
 			}
-			while (isascii(*p) && isspace(*p))
+			while (SM_ISSPACE(*p))
 				p++;
 			if (*p == '\0')
 				break;
@@ -1754,7 +1738,7 @@ makemailer(line)
 		if (strcmp(m->m_argv[0], "TCP") != 0
 #if NETUNIX
 		    && strcmp(m->m_argv[0], "FILE") != 0
-#endif /* NETUNIX */
+#endif
 		    )
 		{
 			(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
@@ -1762,9 +1746,9 @@ makemailer(line)
 					     m->m_name, m->m_mailer,
 #if NETUNIX
 					     "TCP or FILE"
-#else /* NETUNIX */
+#else
 					     "TCP"
-#endif /* NETUNIX */
+#endif
 				     );
 		}
 		if (m->m_mtatype == NULL)
@@ -1994,9 +1978,9 @@ makeargv(p)
 	while (*p != '\0' && i < MAXPV)
 	{
 		q = p;
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 			p++;
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			*p++ = '\0';
 		argv[i++] = newstr(q);
 	}
@@ -2243,19 +2227,19 @@ static struct ssl_options
 #endif
 #ifdef SSL_OP_NO_ANTI_REPLAY
 	{ "SSL_OP_NO_ANTI_REPLAY",	SSL_OP_NO_ANTI_REPLAY },
-#endif 
+#endif
 #ifdef SSL_OP_ALLOW_NO_DHE_KEX
 	{ "SSL_OP_ALLOW_NO_DHE_KEX",	SSL_OP_ALLOW_NO_DHE_KEX },
-#endif 
+#endif
 #ifdef SSL_OP_NO_ENCRYPT_THEN_MAC
 	{ "SSL_OP_NO_ENCRYPT_THEN_MAC",	SSL_OP_NO_ENCRYPT_THEN_MAC },
-#endif 
+#endif
 #ifdef SSL_OP_ENABLE_MIDDLEBOX_COMPAT
 	{ "SSL_OP_ENABLE_MIDDLEBOX_COMPAT",	SSL_OP_ENABLE_MIDDLEBOX_COMPAT },
-#endif 
+#endif
 #ifdef SSL_OP_PRIORITIZE_CHACHA
 	{ "SSL_OP_PRIORITIZE_CHACHA",	SSL_OP_PRIORITIZE_CHACHA },
-#endif 
+#endif
 	{ NULL,		0		}
 };
 
@@ -2274,7 +2258,6 @@ static struct ssl_options
 
 #define SSLOPERR_NAN	1
 #define SSLOPERR_NOTFOUND	2
-#define SM_ISSPACE(c)	(isascii(c) && isspace(c))
 
 static int readssloptions __P((char *, char *, unsigned long *, int ));
 
@@ -2634,6 +2617,10 @@ static struct resolverflags
 # ifdef RES_USE_DNSSEC
 	{ "use_dnssec",	RES_USE_DNSSEC	},
 # endif
+# if RES_TRUSTAD
+	{ "trustad",	RES_TRUSTAD	},
+# endif
+	{ "true",	0		},	/* avoid error on old syntax */
 	{ "true",	0		},	/* avoid error on old syntax */
 	{ NULL,		0		}
 };
@@ -2653,7 +2640,7 @@ static struct optioninfo
 {
 #if defined(SUN_EXTENSIONS) && defined(REMOTE_MODE)
 	{ "RemoteMode",			'>',		OI_NONE	},
-#endif /* defined(SUN_EXTENSIONS) && defined(REMOTE_MODE) */
+#endif
 	{ "SevenBitInput",		'7',		OI_SAFE	},
 	{ "EightBitMode",		'8',		OI_SAFE	},
 	{ "AliasFile",			'A',		OI_NONE	},
@@ -2776,7 +2763,7 @@ static struct optioninfo
 #if _FFR_DONTLOCKFILESFORREAD_OPTION
 # define O_DONTLOCK	0xa4
 	{ "DontLockFilesForRead",	O_DONTLOCK,	OI_NONE	},
-#endif /* _FFR_DONTLOCKFILESFORREAD_OPTION */
+#endif
 #define O_MAXALIASRCSN	0xa5
 	{ "MaxAliasRecursion",		O_MAXALIASRCSN,	OI_NONE	},
 #define O_CNCTONLYTO	0xa6
@@ -2792,15 +2779,15 @@ static struct optioninfo
 #if _FFR_MAX_FORWARD_ENTRIES
 # define O_MAXFORWARD	0xab
 	{ "MaxForwardEntries",		O_MAXFORWARD,	OI_NONE	},
-#endif /* _FFR_MAX_FORWARD_ENTRIES */
+#endif
 #define O_PROCTITLEPREFIX	0xac
 	{ "ProcessTitlePrefix",		O_PROCTITLEPREFIX,	OI_NONE	},
 #define O_SASLINFO	0xad
 #if _FFR_ALLOW_SASLINFO
 	{ "DefaultAuthInfo",		O_SASLINFO,	OI_SAFE	},
-#else /* _FFR_ALLOW_SASLINFO */
+#else
 	{ "DefaultAuthInfo",		O_SASLINFO,	OI_NONE	},
-#endif /* _FFR_ALLOW_SASLINFO */
+#endif
 #define O_SASLMECH	0xae
 	{ "AuthMechanisms",		O_SASLMECH,	OI_NONE	},
 #define O_CLIENTPORT	0xaf
@@ -2898,22 +2885,22 @@ static struct optioninfo
 #if _FFR_MSG_ACCEPT
 # define O_MSG_ACCEPT 0xdd
 	{ "MessageAccept",	O_MSG_ACCEPT,	OI_NONE },
-#endif /* _FFR_MSG_ACCEPT */
+#endif
 #if _FFR_QUEUE_RUN_PARANOIA
 # define O_CHK_Q_RUNNERS 0xde
 	{ "CheckQueueRunners",	O_CHK_Q_RUNNERS,	OI_NONE },
-#endif /* _FFR_QUEUE_RUN_PARANOIA */
+#endif
 #if _FFR_EIGHT_BIT_ADDR_OK
 # if !ALLOW_255
 #  ERROR FFR_EIGHT_BIT_ADDR_OK requires _ALLOW_255
-# endif /* !ALLOW_255 */
+# endif
 # define O_EIGHT_BIT_ADDR_OK	0xdf
 	{ "EightBitAddrOK",	O_EIGHT_BIT_ADDR_OK,	OI_NONE },
 #endif /* _FFR_EIGHT_BIT_ADDR_OK */
 #if _FFR_ADDR_TYPE_MODES
 # define O_ADDR_TYPE_MODES	0xe0
 	{ "AddrTypeModes",	O_ADDR_TYPE_MODES,	OI_NONE },
-#endif /* _FFR_ADDR_TYPE_MODES */
+#endif
 #if _FFR_BADRCPT_SHUTDOWN
 # define O_RCPTSHUTD	0xe1
 	{ "BadRcptShutdown",		O_RCPTSHUTD,	OI_SAFE },
@@ -2929,7 +2916,7 @@ static struct optioninfo
 #if _FFR_RCPTTHROTDELAY
 # define O_RCPTTHROTDELAY	0xe6
 	{ "BadRcptThrottleDelay",	O_RCPTTHROTDELAY,	OI_SAFE	},
-#endif /* _FFR_RCPTTHROTDELAY */
+#endif
 #if 0 && _FFR_QOS && defined(SOL_IP) && defined(IP_TOS)
 # define O_INETQOS	0xe7	/* reserved for FFR_QOS */
 	{ "InetQoS",			O_INETQOS,	OI_NONE },
@@ -2937,15 +2924,15 @@ static struct optioninfo
 #if STARTTLS && _FFR_FIPSMODE
 # define O_FIPSMODE	0xe8
 	{ "FIPSMode",		O_FIPSMODE,	OI_NONE	},
-#endif /* STARTTLS && _FFR_FIPSMODE  */
+#endif
 #if _FFR_REJECT_NUL_BYTE
 # define O_REJECTNUL	0xe9
 	{ "RejectNUL",	O_REJECTNUL,	OI_SAFE	},
-#endif /* _FFR_REJECT_NUL_BYTE */
+#endif
 #if _FFR_BOUNCE_QUEUE
 # define O_BOUNCEQUEUE 0xea
 	{ "BounceQueue",		O_BOUNCEQUEUE,	OI_NONE },
-#endif /* _FFR_BOUNCE_QUEUE */
+#endif
 #if _FFR_ADD_BCC
 # define O_ADDBCC 0xeb
 	{ "AddBcc",			O_ADDBCC,	OI_NONE },
@@ -2964,7 +2951,7 @@ static struct optioninfo
 # define O_NSPORTIP		0xf0
 	{ "NameServer",	O_NSPORTIP,	OI_NONE	},
 #endif
-#if _FFR_TLSA_DANE
+#if DANE
 # define O_DANE		0xf1
 	{ "DANE",	O_DANE,	OI_NONE	},
 #endif
@@ -2986,6 +2973,10 @@ static struct optioninfo
 	{ "ClientCACertFile",			O_CLTCACERTFILE, OI_NONE },
 #define O_CLTCACERTPATH	0xf6
 	{ "ClientCACertPath",			O_CLTCACERTPATH, OI_NONE },
+#endif
+#if _FFR_TLS_ALTNAMES
+# define O_CHECKALTNAMES 0xf7
+	{ "SetCertAltnames",			O_CHECKALTNAMES, OI_NONE },
 #endif
 
 	{ NULL,				'\0',		OI_NONE	}
@@ -3019,18 +3010,18 @@ setoption(opt, val, safe, sticky, e)
 	register char *p;
 	register struct optioninfo *o;
 	char *subopt;
-	int mid;
+	int i;
 	bool can_setuid = RunAsUid == 0;
 	auto char *ep;
 	char buf[50];
 	extern bool Warn_Q_option;
 #if _FFR_ALLOW_SASLINFO
 	extern unsigned int SubmitMode;
-#endif /* _FFR_ALLOW_SASLINFO */
+#endif
 #if STARTTLS || SM_CONF_SHM
 	char *newval;
 	char exbuf[MAXLINE];
-#endif /* STARTTLS || SM_CONF_SHM */
+#endif
 #if STARTTLS
 	unsigned long *pssloptions = NULL;
 #endif
@@ -3373,7 +3364,7 @@ setoption(opt, val, safe, sticky, e)
 				p--;
 			p++;
 			q = p;
-			while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+			while (*p != '\0' && !(SM_ISSPACE(*p)))
 				p++;
 			if (*p != '\0')
 				*p++ = '\0';
@@ -3441,13 +3432,13 @@ setoption(opt, val, safe, sticky, e)
 
 	  case 'M':		/* define macro */
 		sticky = false;
-		mid = macid_parse(val, &ep);
-		if (mid == 0)
+		i = macid_parse(val, &ep);
+		if (i == 0)
 			break;
 		p = newstr(ep);
 		if (!safe)
 			cleanstrcpy(p, p, strlen(p) + 1);
-		macdefine(&CurEnv->e_macro, A_TEMP, mid, p);
+		macdefine(&CurEnv->e_macro, A_TEMP, i, p);
 		break;
 
 	  case 'm':		/* send to me too */
@@ -3583,9 +3574,9 @@ setoption(opt, val, safe, sticky, e)
 		{
 # if _FFR_DOTTED_USERNAMES
 			if (*p == '/' || *p == ':')
-# else /* _FFR_DOTTED_USERNAMES */
+# else
 			if (*p == '.' || *p == '/' || *p == ':')
-# endif /* _FFR_DOTTED_USERNAMES */
+# endif
 			{
 				*p++ = '\0';
 				break;
@@ -3676,7 +3667,7 @@ setoption(opt, val, safe, sticky, e)
 
 #if _FFR_QUEUE_GROUP_SORTORDER
 	/* coordinate this with makequeue() */
-#endif /* _FFR_QUEUE_GROUP_SORTORDER */
+#endif
 	  case O_QUEUESORTORD:	/* queue sorting order */
 		switch (*val)
 		{
@@ -3811,7 +3802,7 @@ setoption(opt, val, safe, sticky, e)
 #if !HASNICE
 		(void) sm_io_fprintf(smioout, SM_TIME_DEFAULT,
 				     "Warning: NiceQueueRun set on system that doesn't support nice()\n");
-#endif /* !HASNICE */
+#endif
 
 		/* XXX do we want to check the range? > 0 ? */
 		NiceQueueRun = atoi(val);
@@ -3841,7 +3832,7 @@ setoption(opt, val, safe, sticky, e)
 	  case O_MAXFORWARD:	/* max # of forward entries */
 		MaxForwardEntries = atoi(val);
 		break;
-#endif /* _FFR_MAX_FORWARD_ENTRIES */
+#endif
 
 	  case O_KEEPCNAMES:	/* don't expand CNAME records */
 		DontExpandCnames = atobool(val);
@@ -3919,9 +3910,9 @@ setoption(opt, val, safe, sticky, e)
 		{
 # if _FFR_DOTTED_USERNAMES
 			if (*p == '/' || *p == ':')
-# else /* _FFR_DOTTED_USERNAMES */
+# else
 			if (*p == '.' || *p == '/' || *p == ':')
-# endif /* _FFR_DOTTED_USERNAMES */
+# endif
 			{
 				*p++ = '\0';
 				break;
@@ -4066,7 +4057,7 @@ setoption(opt, val, safe, sticky, e)
 	  case O_RCPTTHROTDELAY:
 		BadRcptThrottleDelay = atoi(val);
 		break;
-#endif /* _FFR_RCPTTHROTDELAY */
+#endif
 
 	  case O_DEADLETTER:
 		CANONIFY(val);
@@ -4077,7 +4068,7 @@ setoption(opt, val, safe, sticky, e)
 	  case O_DONTLOCK:
 		DontLockReadFiles = atobool(val);
 		break;
-#endif /* _FFR_DONTLOCKFILESFORREAD_OPTION */
+#endif
 
 	  case O_MAXALIASRCSN:
 		MaxAliasRecursion = atoi(val);
@@ -4086,11 +4077,30 @@ setoption(opt, val, safe, sticky, e)
 	  case O_CNCTONLYTO:
 		/* XXX should probably use gethostbyname */
 #if NETINET || NETINET6
+		i = 0;
+		if ((subopt = strchr(val, '@')) != NULL)
+		{
+			*subopt = '\0';
+			i = (int) strtoul(val, NULL, 0);
+
+			/* stricter checks? probably not useful. */
+			if (i > USHRT_MAX)
+			{
+				syserr("readcf: option ConnectOnlyTo: invalid port %s",
+					val);
+				break;
+			}
+			val = subopt + 1;
+		}
 		ConnectOnlyTo.sa.sa_family = AF_UNSPEC;
 # if NETINET6
 		if (anynet_pton(AF_INET6, val,
 				&ConnectOnlyTo.sin6.sin6_addr) == 1)
+		{
 			ConnectOnlyTo.sa.sa_family = AF_INET6;
+			if (i != 0)
+				ConnectOnlyTo.sin6.sin6_port = htons(i);
+		}
 		else
 # endif /* NETINET6 */
 # if NETINET
@@ -4098,6 +4108,8 @@ setoption(opt, val, safe, sticky, e)
 			ConnectOnlyTo.sin.sin_addr.s_addr = inet_addr(val);
 			if (ConnectOnlyTo.sin.sin_addr.s_addr != INADDR_NONE)
 				ConnectOnlyTo.sa.sa_family = AF_INET;
+			if (i != 0)
+				ConnectOnlyTo.sin.sin_port = htons(i);
 		}
 
 # endif /* NETINET */
@@ -4455,7 +4467,7 @@ setoption(opt, val, safe, sticky, e)
 	  case O_FIPSMODE:
 		FipsMode = atobool(val);
 		break;
-#endif /* STARTTLS && _FFR_FIPSMODE  */
+#endif
 
 	  case O_CLIENTPORT:
 		setclientoptions(val);
@@ -4542,9 +4554,9 @@ setoption(opt, val, safe, sticky, e)
 	  case O_REQUIRES_DIR_FSYNC:
 #if REQUIRES_DIR_FSYNC
 		RequiresDirfsync = atobool(val);
-#else /* REQUIRES_DIR_FSYNC */
+#else
 		/* silently ignored... required for cf file option */
-#endif /* REQUIRES_DIR_FSYNC */
+#endif
 		break;
 
 	  case O_CONNECTION_RATE_WINDOW_SIZE:
@@ -4580,25 +4592,25 @@ setoption(opt, val, safe, sticky, e)
 	  case O_MSG_ACCEPT:
 		MessageAccept = newstr(val);
 		break;
-#endif /* _FFR_MSG_ACCEPT */
+#endif
 
 #if _FFR_QUEUE_RUN_PARANOIA
 	  case O_CHK_Q_RUNNERS:
 		CheckQueueRunners = atoi(val);
 		break;
-#endif /* _FFR_QUEUE_RUN_PARANOIA */
+#endif
 
 #if _FFR_EIGHT_BIT_ADDR_OK
 	  case O_EIGHT_BIT_ADDR_OK:
 		EightBitAddrOK = atobool(val);
 		break;
-#endif /* _FFR_EIGHT_BIT_ADDR_OK */
+#endif
 
 #if _FFR_ADDR_TYPE_MODES
 	  case O_ADDR_TYPE_MODES:
 		AddrTypeModes = atobool(val);
 		break;
-#endif /* _FFR_ADDR_TYPE_MODES */
+#endif
 
 #if _FFR_BADRCPT_SHUTDOWN
 	  case O_RCPTSHUTD:
@@ -4614,13 +4626,13 @@ setoption(opt, val, safe, sticky, e)
 	  case O_REJECTNUL:
 		RejectNUL = atobool(val);
 		break;
-#endif /* _FFR_REJECT_NUL_BYTE */
+#endif
 
 #if _FFR_BOUNCE_QUEUE
 	  case O_BOUNCEQUEUE:
 		bouncequeue = newstr(val);
 		break;
-#endif /* _FFR_BOUNCE_QUEUE */
+#endif
 
 #if _FFR_ADD_BCC
 	  case O_ADDBCC:
@@ -4640,7 +4652,7 @@ setoption(opt, val, safe, sticky, e)
 		break;
 #endif
 
-#if _FFR_TLSA_DANE
+#if DANE
 	  case O_DANE:
 		if (sm_strcasecmp(val, "always") == 0)
 			Dane = DANE_ALWAYS;
@@ -4660,6 +4672,12 @@ setoption(opt, val, safe, sticky, e)
 		KeepBcc = atobool(val);
 		break;
 #endif
+
+# if _FFR_TLS_ALTNAMES
+	  case O_CHECKALTNAMES:
+		SetCertAltnames = atobool(val);
+		break;
+# endif
 
 	  default:
 		if (tTd(37, 1))
@@ -4751,7 +4769,7 @@ makemapentry(line)
 	register STAB *s;
 	STAB *class;
 
-	for (p = line; isascii(*p) && isspace(*p); p++)
+	for (p = line; SM_ISSPACE(*p); p++)
 		continue;
 	if (!(isascii(*p) && isalnum(*p)))
 	{
@@ -4764,7 +4782,7 @@ makemapentry(line)
 		continue;
 	if (*p != '\0')
 		*p++ = '\0';
-	while (isascii(*p) && isspace(*p))
+	while (SM_ISSPACE(*p))
 		p++;
 	if (!(isascii(*p) && isalnum(*p)))
 	{
@@ -4776,7 +4794,7 @@ makemapentry(line)
 		continue;
 	if (*p != '\0')
 		*p++ = '\0';
-	while (isascii(*p) && isspace(*p))
+	while (SM_ISSPACE(*p))
 		p++;
 
 	/* look up the class */
@@ -4830,7 +4848,7 @@ strtorwset(p, endp, stabmode)
 	int ruleset;
 	static int nextruleset = MAXRWSETS;
 
-	while (isascii(*p) && isspace(*p))
+	while (SM_ISSPACE(*p))
 		p++;
 	if (!isascii(*p))
 	{
@@ -4862,7 +4880,7 @@ strtorwset(p, endp, stabmode)
 			syserr("invalid ruleset name: \"%.20s\"", q);
 			return -1;
 		}
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			*p++ = '\0';
 		delim = *p;
 		if (delim != '\0')
@@ -5251,13 +5269,13 @@ settimeout(name, val, sticky)
 	  case TO_AUTH:
 		TimeOuts.to_auth = toval;
 		break;
-#endif /* SASL */
+#endif
 
 #if STARTTLS
 	  case TO_STARTTLS:
 		TimeOuts.to_starttls = toval;
 		break;
-#endif /* STARTTLS */
+#endif
 
 	  default:
 		syserr("settimeout: invalid timeout %s", name);
@@ -5313,18 +5331,18 @@ inittimeouts(val, sticky)
 		TimeOuts.to_miscshort = (time_t) 2 MINUTES;
 #if IDENTPROTO
 		TimeOuts.to_ident = (time_t) 5 SECONDS;
-#else /* IDENTPROTO */
+#else
 		TimeOuts.to_ident = (time_t) 0 SECONDS;
-#endif /* IDENTPROTO */
+#endif
 		TimeOuts.to_fileopen = (time_t) 60 SECONDS;
 		TimeOuts.to_control = (time_t) 2 MINUTES;
 		TimeOuts.to_lhlo = (time_t) 2 MINUTES;
 #if SASL
 		TimeOuts.to_auth = (time_t) 10 MINUTES;
-#endif /* SASL */
+#endif
 #if STARTTLS
 		TimeOuts.to_starttls = (time_t) 1 HOUR;
-#endif /* STARTTLS */
+#endif
 		if (tTd(37, 5))
 		{
 			sm_dprintf("Timeouts:\n");
@@ -5362,7 +5380,7 @@ inittimeouts(val, sticky)
 
 	for (;; val = p)
 	{
-		while (isascii(*val) && isspace(*val))
+		while (SM_ISSPACE(*val))
 			val++;
 		if (*val == '\0')
 			break;

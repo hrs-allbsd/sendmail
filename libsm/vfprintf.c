@@ -538,16 +538,16 @@ reswitch:	switch (ch)
 #if HASSNPRINTF
 					snprintf(out, sizeof(out), fmt, width,
 						prec, val);
-#else /* HASSNPRINTF */
+#else
 					sprintf(out, fmt, width, prec, val);
-#endif /* HASSNPRINTF */
+#endif
 				else
 #if HASSNPRINTF
 					snprintf(out, sizeof(out), fmt, width,
 						val);
-#else /* HASSNPRINTF */
+#else
 					sprintf(out, fmt, width, val);
-#endif /* HASSNPRINTF */
+#endif
 				len = strlen(out);
 				PRINT(out, len);
 				FLUSH();

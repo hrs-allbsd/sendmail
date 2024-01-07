@@ -46,7 +46,7 @@ SM_RCSID("@(#)$Id: tls.c,v 8.127 2013-11-27 02:51:11 gshapiro Exp $")
 # if !TLS_NO_RSA && MTA_RSA_TMP_CB
 static RSA *rsa_tmp = NULL;	/* temporary RSA key */
 static RSA *tmp_rsa_key __P((SSL *, int, int));
-# endif /* !TLS_NO_RSA && MTA_RSA_TMP_CB */
+# endif
 static int	tls_verify_cb __P((X509_STORE_CTX *, void *));
 
 static int x509_verify_cb __P((int, X509_STORE_CTX *));
@@ -80,13 +80,13 @@ static DH *
 get_dh512()
 {
 	DH *dh = NULL;
-#if MTA_HAVE_DH_set0_pqg
+#  if MTA_HAVE_DH_set0_pqg
 	BIGNUM *dhp_bn, *dhg_bn;
-#endif
+#  endif
 
 	if ((dh = DH_new()) == NULL)
 		return NULL;
-#if MTA_HAVE_DH_set0_pqg
+#  if MTA_HAVE_DH_set0_pqg
 	dhp_bn = BN_bin2bn(dh512_p, sizeof (dh512_p), NULL);
 	dhg_bn = BN_bin2bn(dh512_g, sizeof (dh512_g), NULL);
 	if (dhp_bn == NULL || dhg_bn == NULL || !DH_set0_pqg(dh, dhp_bn, NULL, dhg_bn))  {
@@ -95,7 +95,7 @@ get_dh512()
 		BN_free(dhg_bn);
 		return NULL;
 	}
-#else
+#  else
 	dh->p = BN_bin2bn(dh512_p, sizeof(dh512_p), NULL);
 	dh->g = BN_bin2bn(dh512_g, sizeof(dh512_g), NULL);
 	if ((dh->p == NULL) || (dh->g == NULL))
@@ -103,7 +103,7 @@ get_dh512()
 		DH_free(dh);
 		return NULL;
 	}
-#endif
+#  endif
 	return dh;
 }
 
@@ -150,13 +150,13 @@ get_dh2048()
 		};
 	static unsigned char dh2048_g[]={ 0x02, };
 	DH *dh;
-#if MTA_HAVE_DH_set0_pqg
+#  if MTA_HAVE_DH_set0_pqg
 	BIGNUM *dhp_bn, *dhg_bn;
-#endif
+#  endif
 
 	if ((dh=DH_new()) == NULL)
 		return(NULL);
-#if MTA_HAVE_DH_set0_pqg
+#  if MTA_HAVE_DH_set0_pqg
 	dhp_bn = BN_bin2bn(dh2048_p, sizeof (dh2048_p), NULL);
 	dhg_bn = BN_bin2bn(dh2048_g, sizeof (dh2048_g), NULL);
 	if (dhp_bn == NULL || dhg_bn == NULL || !DH_set0_pqg(dh, dhp_bn, NULL, dhg_bn))  {
@@ -165,7 +165,7 @@ get_dh2048()
 		BN_free(dhg_bn);
 		return NULL;
 	}
-#else
+#  else
 	dh->p=BN_bin2bn(dh2048_p,sizeof(dh2048_p),NULL);
 	dh->g=BN_bin2bn(dh2048_g,sizeof(dh2048_g),NULL);
 	if ((dh->p == NULL) || (dh->g == NULL))
@@ -173,7 +173,7 @@ get_dh2048()
 		DH_free(dh);
 		return(NULL);
 	}
-#endif
+#  endif
 	return(dh);
 }
 # endif /* !NO_DH */
@@ -229,7 +229,7 @@ tls_rand_init(randfile, logl)
 	ok = false;
 	done = RI_FAIL;
 	randdef = (randfile == NULL || *randfile == '\0') ? RF_MISS : RF_OK;
-#   if EGD
+#  if EGD
 	if (randdef == RF_OK && sm_strncasecmp(randfile, "egd:", 4) == 0)
 	{
 		randfile += 4;
@@ -243,7 +243,7 @@ tls_rand_init(randfile, logl)
 			ok = true;
 	}
 	else
-#   endif /* EGD */
+#  endif /* EGD */
 	if (randdef == RF_OK && sm_strncasecmp(randfile, "file:", 5) == 0)
 	{
 		int fd;
@@ -390,12 +390,12 @@ init_tls_library(fipsmode)
 	**  so no explicit initialisation is required."
 	*/
 
-#if !MTA_HAVE_OPENSSL_init_ssl
+# if !MTA_HAVE_OPENSSL_init_ssl
 	/* basic TLS initialization, ignore result for now */
 	SSL_library_init();
 	SSL_load_error_strings();
 	OpenSSL_add_all_algorithms();
-#endif
+# endif
 
 	bv = true;
 	if (TLSsslidx < 0)
@@ -436,7 +436,7 @@ init_tls_library(fipsmode)
 		if (CertFingerprintAlgorithm == NULL)
 			CertFingerprintAlgorithm = "sha1";
 	}
-#endif /* _FFR_FIPSMODE  */
+# endif /* _FFR_FIPSMODE  */
 
 	if (!TLS_set_engine(SSLEngine, true))
 	{
@@ -497,10 +497,10 @@ tls_set_verify(ctx, ssl, vrfy)
 {
 # if !TLS_VRFY_PER_CTX
 	SSL_set_verify(ssl, vrfy ? SSL_VERIFY_PEER : SSL_VERIFY_NONE, NULL);
-# else /* !TLS_VRFY_PER_CTX */
+# else
 	SSL_CTX_set_verify(ctx, vrfy ? SSL_VERIFY_PEER : SSL_VERIFY_NONE,
 			NULL);
-# endif /* !TLS_VRFY_PER_CTX */
+# endif
 }
 
 /*
@@ -626,6 +626,7 @@ tls_safe_f(var, sff, srv)
 **	Returns:
 **		0/SFF_NORFILES
 */
+
 # define TLS_UNR(bit, req)	(bitset(bit, req) ? SFF_NORFILES : 0)
 # define TLS_OUNR(bit, req)	(bitset(bit, req) ? SFF_NOWRFILES : 0)
 # define TLS_KEYSFF(req)	\
@@ -922,11 +923,11 @@ load_crlpath(ctx, srv, path)
 static char server_session_id_context[] = "sendmail8";
 
 /* 0.9.8a and b have a problem with SSL_OP_TLS_BLOCK_PADDING_BUG */
-#if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
-# define SM_SSL_OP_TLS_BLOCK_PADDING_BUG	1
-#else
-# define SM_SSL_OP_TLS_BLOCK_PADDING_BUG	0
-#endif
+# if (OPENSSL_VERSION_NUMBER >= 0x0090800fL)
+#  define SM_SSL_OP_TLS_BLOCK_PADDING_BUG	1
+# else
+#  define SM_SSL_OP_TLS_BLOCK_PADDING_BUG	0
+# endif
 
 bool
 inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhparam)
@@ -947,10 +948,10 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 # if SM_CONF_SHM && !TLS_NO_RSA && MTA_RSA_TMP_CB
 	extern int ShmId;
 # endif
-#if SM_SSL_OP_TLS_BLOCK_PADDING_BUG
+# if SM_SSL_OP_TLS_BLOCK_PADDING_BUG
 	long rt_version;
 	STACK_OF(SSL_COMP) *comp_methods;
-#endif
+# endif
 
 	status = TLS_S_NONE;
 	who = srv ? "server" : "client";
@@ -1027,7 +1028,7 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 	**  /file/name	read parameters from /file/name
 	*/
 
-#define SET_DH_DFL	\
+# define SET_DH_DFL	\
 	do {	\
 		dhparam = "I";	\
 		req |= TLS_I_DHFIXED;	\
@@ -1124,7 +1125,7 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 		return false;
 	}
 
-#if _FFR_VRFY_TRUSTED_FIRST
+# if _FFR_VRFY_TRUSTED_FIRST
 	if (!tTd(88, 101))
 	{
 		X509_STORE *store;
@@ -1134,19 +1135,19 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 		SM_ASSERT(store != NULL);
 		X509_STORE_set_flags(store, X509_V_FLAG_TRUSTED_FIRST);
 	}
-#endif
+# endif
 
 	if (CRLFile != NULL && !load_crlfile(*ctx, srv, CRLFile))
 		return false;
 	if (CRLPath != NULL && !load_crlpath(*ctx, srv, CRLPath))
 		return false;
 
-#if defined(SSL_MODE_AUTO_RETRY) && OPENSSL_VERSION_NUMBER >= 0x10100000L && OPENSSL_VERSION_NUMBER < 0x20000000L
+# if defined(SSL_MODE_AUTO_RETRY) && OPENSSL_VERSION_NUMBER >= 0x10100000L && OPENSSL_VERSION_NUMBER < 0x20000000L
 	/*
 	 *  Turn off blocking I/O handling in OpenSSL: someone turned
 	 *  this on by default in 1.1? should we check first?
 	 */
-# if _FFR_TESTS
+#  if _FFR_TESTS
 	if (LogLevel > 9) {
 		sff = SSL_CTX_get_mode(*ctx);
 		if (sff & SSL_MODE_AUTO_RETRY)
@@ -1159,9 +1160,9 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 	if (tTd(96, 101) || getenv("SSL_MODE_AUTO_RETRY") != NULL)
 			SSL_CTX_set_mode(*ctx, SSL_MODE_AUTO_RETRY);
 	else
-# endif
+#  endif
 	SSL_CTX_clear_mode(*ctx, SSL_MODE_AUTO_RETRY);
-#endif /* defined(SSL_MODE_AUTO_RETRY) && OPENSSL_VERSION_NUMBER >= 0x10100000L && OPENSSL_VERSION_NUMBER < 0x20000000L */
+# endif /* defined(SSL_MODE_AUTO_RETRY) && OPENSSL_VERSION_NUMBER >= 0x10100000L && OPENSSL_VERSION_NUMBER < 0x20000000L */
 
 
 # if TLS_NO_RSA
@@ -1220,15 +1221,15 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 			return false;
 	}
 
-#if _FFR_TLS_USE_CERTIFICATE_CHAIN_FILE
-# define SSL_CTX_use_cert(ssl_ctx, certfile) \
+# if _FFR_TLS_USE_CERTIFICATE_CHAIN_FILE
+#  define SSL_CTX_use_cert(ssl_ctx, certfile) \
 	SSL_CTX_use_certificate_chain_file(ssl_ctx, certfile)
-# define SSL_CTX_USE_CERT "SSL_CTX_use_certificate_chain_file"
-#else
-# define SSL_CTX_use_cert(ssl_ctx, certfile) \
+#  define SSL_CTX_USE_CERT "SSL_CTX_use_certificate_chain_file"
+# else
+#  define SSL_CTX_use_cert(ssl_ctx, certfile) \
 	SSL_CTX_use_certificate_file(ssl_ctx, certfile, SSL_FILETYPE_PEM)
-# define SSL_CTX_USE_CERT "SSL_CTX_use_certificate_file"
-#endif
+#  define SSL_CTX_USE_CERT "SSL_CTX_use_certificate_file"
+# endif
 
 	/* get the certificate file */
 	if (bitset(TLS_S_CERT_OK, status) &&
@@ -1305,7 +1306,7 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 
 	/* SSL_CTX_set_quiet_shutdown(*ctx, 1); violation of standard? */
 
-#if SM_SSL_OP_TLS_BLOCK_PADDING_BUG
+# if SM_SSL_OP_TLS_BLOCK_PADDING_BUG
 
 	/*
 	**  In OpenSSL 0.9.8[ab], enabling zlib compression breaks the
@@ -1324,7 +1325,7 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 		if (comp_methods != NULL && sk_SSL_COMP_num(comp_methods) > 0)
 			options &= ~SSL_OP_TLS_BLOCK_PADDING_BUG;
 	}
-#endif
+# endif
 	SSL_CTX_set_options(*ctx, (long) options);
 
 # if !NO_DH
@@ -1379,7 +1380,7 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 			if (tTd(96, 2))
 				sm_dprintf("inittls: Generating %d bit DH parameters\n", bits);
 
-#if MTA_HAVE_DSA_GENERATE_EX
+#  if MTA_HAVE_DSA_GENERATE_EX
 			dsa = DSA_new();
 			if (dsa != NULL)
 			{
@@ -1388,12 +1389,12 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 				if (r != 0)
 					dh = DSA_dup_DH(dsa);
 			}
-#else
+#  else
 			/* this takes a while! */
 			dsa = DSA_generate_parameters(bits, NULL, 0, NULL,
 						      NULL, 0, NULL);
 			dh = DSA_dup_DH(dsa);
-#endif
+#  endif
 			DSA_free(dsa);
 		}
 		else if (dh == NULL && bitset(TLS_I_DHFIXED, req))
@@ -1502,23 +1503,19 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 			**  but we hope that that function will later on
 			**  only set the mode per connection.
 			*/
+
 			SSL_CTX_set_verify(*ctx,
 				bitset(TLS_I_NO_VRFY, req) ? SSL_VERIFY_NONE
 							   : SSL_VERIFY_PEER,
 				NULL);
 
-			/* install verify callback */
-# if _FFR_TLSA_DANE
-			Dane_vrfy_ctx.dane_vrfy_chk = Dane;
-			SSL_CTX_set_cert_verify_callback(*ctx, tls_verify_cb,
-				(void *)&Dane_vrfy_ctx);
-# else
-			SSL_CTX_set_cert_verify_callback(*ctx, tls_verify_cb,
-							NULL);
-# endif
 			if (srv)
+			{
 				SSL_CTX_set_client_CA_list(*ctx,
 					SSL_load_client_CA_file(cacertfile));
+			}
+			SSL_CTX_set_cert_verify_callback(*ctx, tls_verify_cb,
+							NULL);
 		}
 		else
 		{
@@ -1528,6 +1525,7 @@ inittls(ctx, req, options, srv, certfile, keyfile, cacertpath, cacertfile, dhpar
 			**  which in turn would be necessary
 			**  if we want to allow relaying based on it.
 			*/
+
 			if (LogLevel > 5)
 			{
 				sm_syslog(LOG_WARNING, NOQID,
@@ -1673,13 +1671,15 @@ static void
 getaltnames(cert, srv, host)
 	X509 *cert;
 	bool srv;
-	char *host;
+	const char *host;
 {
 	STACK_OF(GENERAL_NAME) *gens;
 	int i, j, len, r;
 	const GENERAL_NAME *gn;
 	char *dnsname, *who;
 
+	if (!SetCertAltnames)
+		return;
 	who = srv ? "server" : "client";
 	gens = X509_get_ext_d2i(cert, NID_subject_alt_name, 0, 0);
 	if (gens == NULL)
@@ -1764,6 +1764,9 @@ tls_get_info(ssl, srv, host, mac, certreq)
 	char *s, *who;
 	char bitstr[16];
 	X509 *cert;
+# if DANE
+	dane_vrfy_ctx_P dane_vrfy_ctx;
+# endif
 
 	c = SSL_get_current_cipher(ssl);
 
@@ -1858,19 +1861,30 @@ tls_get_info(ssl, srv, host, mac, certreq)
 		macdefine(mac, A_PERM, macid("{cn_issuer}"), "");
 		macdefine(mac, A_TEMP, macid(CERTFPMACRO), "");
 	}
-# if _FFR_TLSA_DANE
-	if (Dane_vrfy_ctx.dane_vrfy_res == DANE_VRFY_OK)
+# if DANE
+	dane_vrfy_ctx = NULL;
+	if (TLSsslidx >= 0)
+	{
+		tlsi_ctx_T *tlsi_ctx;
+
+		tlsi_ctx = (tlsi_ctx_P) SSL_get_ex_data(ssl, TLSsslidx);
+		if (tlsi_ctx != NULL)
+			dane_vrfy_ctx = &(tlsi_ctx->tlsi_dvc);
+	}
+#  define DANE_VRFY_RES_IS(r) \
+	((dane_vrfy_ctx != NULL) && dane_vrfy_ctx->dane_vrfy_res == (r))
+	if (DANE_VRFY_RES_IS(DANE_VRFY_OK))
 	{
 		s = "TRUSTED";
 		r = TLS_AUTH_OK;
 	}
-	else if (Dane_vrfy_ctx.dane_vrfy_res == DANE_VRFY_FAIL)
+	else if (DANE_VRFY_RES_IS(DANE_VRFY_FAIL))
 	{
 		s = "DANE_FAIL";
 		r = TLS_AUTH_FAIL;
 	}
 	else
-# endif
+# endif /* if DANE */
 	switch (verifyok)
 	{
 	  case X509_V_OK:
@@ -1905,14 +1919,25 @@ tls_get_info(ssl, srv, host, mac, certreq)
 		s1 = macget(mac, macid("{verify}"));
 		s2 = macget(mac, macid("{cipher}"));
 
+# if DANE
+#  define LOG_DANE_FP	\
+	('\0' != dane_vrfy_ctx->dane_vrfy_fp[0] && DANE_VRFY_RES_IS(DANE_VRFY_FAIL))
+# endif
 		/* XXX: maybe cut off ident info? */
 		sm_syslog(LOG_INFO, NOQID,
-			  "STARTTLS=%s, relay=%.100s, version=%.16s, verify=%.16s, cipher=%.64s, bits=%.6s/%.6s",
+			  "STARTTLS=%s, relay=%.100s, version=%.16s, verify=%.16s, cipher=%.64s, bits=%.6s/%.6s%s%s",
 			  who,
 			  host == NULL ? "local" : host,
 			  vers, s1, s2, /* sm_snprintf() can deal with NULL */
 			  algbits == NULL ? "0" : algbits,
-			  cbits == NULL ? "0" : cbits);
+			  cbits == NULL ? "0" : cbits
+# if DANE
+			, LOG_DANE_FP ? ", pubkey_fp=" : ""
+			, LOG_DANE_FP ? dane_vrfy_ctx->dane_vrfy_fp : ""
+# else
+			, "", ""
+# endif
+			);
 		if (LogLevel > 11)
 		{
 			/*
@@ -2034,9 +2059,9 @@ endtls(pssl, who)
 **		temporary RSA key.
 */
 
-#   ifndef MAX_RSA_TMP_CNT
-#    define MAX_RSA_TMP_CNT	1000	/* XXX better value? */
-#   endif
+#  ifndef MAX_RSA_TMP_CNT
+#   define MAX_RSA_TMP_CNT	1000	/* XXX better value? */
+#  endif
 
 /* ARGUSED0 */
 static RSA *
@@ -2045,14 +2070,14 @@ tmp_rsa_key(s, export, keylength)
 	int export;
 	int keylength;
 {
-#   if SM_CONF_SHM
+#  if SM_CONF_SHM
 	extern int ShmId;
 	extern int *PRSATmpCnt;
 
 	if (ShmId != SM_SHM_NO_ID && rsa_tmp != NULL &&
 	    ++(*PRSATmpCnt) < MAX_RSA_TMP_CNT)
 		return rsa_tmp;
-#   endif /* SM_CONF_SHM */
+#  endif /* SM_CONF_SHM */
 
 	if (rsa_tmp != NULL)
 		RSA_free(rsa_tmp);
@@ -2065,8 +2090,8 @@ tmp_rsa_key(s, export, keylength)
 	}
 	else
 	{
-#   if SM_CONF_SHM
-#    if 0
+#  if SM_CONF_SHM
+#   if 0
 		/*
 		**  XXX we can't (yet) share the new key...
 		**	The RSA structure contains pointers hence it can't be
@@ -2077,8 +2102,8 @@ tmp_rsa_key(s, export, keylength)
 
 		if (ShmId != SM_SHM_NO_ID)
 			*PRSATmpCnt = 0;
-#    endif /* 0 */
-#   endif /* SM_CONF_SHM */
+#   endif /* 0 */
+#  endif /* SM_CONF_SHM */
 		if (LogLevel > 9)
 			sm_syslog(LOG_ERR, NOQID,
 				  "STARTTLS=server, tmp_rsa_key: new temp RSA key");
@@ -2199,7 +2224,7 @@ tls_verify_log(ok, ctx, name)
 
 #define SM_DECTLSI	\
 	tlsi_ctx_T *tlsi_ctx;	\
-	SSL *ssl;
+	SSL *ssl
 #define SM_GETTLSI	\
 	do {		\
 		tlsi_ctx = NULL;	\
@@ -2214,101 +2239,175 @@ tls_verify_log(ok, ctx, name)
 	while (0)
 
 
-# if _FFR_TLSA_DANE
+# if DANE
+
+/*
+**  DANE_GET_TLSA -- Retrieve TLSA RR for DANE
+**
+**	Parameters:
+**		dane -- dane verify context
+**
+**	Returns:
+**		dane_tlsa if TLSA RR is available
+**		NULL otherwise
+*/
+
+dane_tlsa_P
+dane_get_tlsa(dane_vrfy_ctx)
+	dane_vrfy_ctx_P dane_vrfy_ctx;
+{
+	STAB *s;
+	dane_tlsa_P dane_tlsa;
+
+	dane_tlsa = NULL;
+	if (NULL == dane_vrfy_ctx)
+		return NULL;
+	if (dane_vrfy_ctx->dane_vrfy_chk == DANE_NEVER ||
+	    dane_vrfy_ctx->dane_vrfy_host == NULL)
+		return NULL;
+
+	GETTLSANOX(dane_vrfy_ctx->dane_vrfy_host, &s,
+		dane_vrfy_ctx->dane_vrfy_port);
+	if (NULL == s)
+		goto notfound;
+	dane_tlsa = s->s_tlsa;
+	if (NULL == dane_tlsa)
+		goto notfound;
+	if (0 == dane_tlsa->dane_tlsa_n)
+		goto notfound;
+	if (tTd(96, 4))
+		sm_dprintf("dane_get_tlsa, chk=%d, host=%s, n=%d, stat=entry found\n",
+			dane_vrfy_ctx->dane_vrfy_chk,
+			dane_vrfy_ctx->dane_vrfy_host, dane_tlsa->dane_tlsa_n);
+	return dane_tlsa;
+
+  notfound:
+	if (tTd(96, 4))
+		sm_dprintf("dane_get_tlsa, chk=%d, host=%s, stat=no valid entry found\n",
+			dane_vrfy_ctx->dane_vrfy_chk,
+			dane_vrfy_ctx->dane_vrfy_host);
+	return NULL;
+}
 
 /*
 **  DANE_VERIFY -- verify callback for TLS certificates
 **
 **	Parameters:
 **		ctx -- X509 context
-**		dane -- callback context
+**		dane_vrfy_ctx -- callback context
 **
 **	Returns:
 **		DANE_VRFY_{OK,NONE,FAIL}
 */
+
+/* NOTE: this only works because the "matching type" is 0, 1, 2 for these! */
+static const char *dane_mdalgs[] = { "", "sha256", "sha512" };
 
 static int
 dane_verify(ctx, dane_vrfy_ctx)
 	X509_STORE_CTX *ctx;
 	dane_vrfy_ctx_P dane_vrfy_ctx;
 {
-	int r, i, ok;
-	STAB *s;
+	int r, i, ok, mdalg;
 	X509 *cert;
 	dane_tlsa_P dane_tlsa;
-	const EVP_MD *md;
 	char *fp;
 
-	if (dane_vrfy_ctx == NULL)
-		return DANE_VRFY_NONE;
-	dane_vrfy_ctx->dane_vrfy_res = DANE_VRFY_NONE;
-	if (dane_vrfy_ctx->dane_vrfy_chk == DANE_NEVER ||
-	    dane_vrfy_ctx->dane_vrfy_host == NULL)
-	{
-		return DANE_VRFY_NONE;
-	}
-
-	s = stab(dane_vrfy_ctx->dane_vrfy_host, ST_TLSA_RR, ST_FIND);
-	if (tTd(96, 4))
-		sm_dprintf("dane_verify, host=%s, s=%p\n",
-			dane_vrfy_ctx->dane_vrfy_host, s);
-	if (s == NULL)
-		return DANE_VRFY_NONE;
-	dane_tlsa = s->s_tlsa;
+	dane_tlsa = dane_get_tlsa(dane_vrfy_ctx);
 	if (dane_tlsa == NULL)
 		return DANE_VRFY_NONE;
-	if (dane_tlsa->dane_tlsa_n == 0)
-		return DANE_VRFY_NONE;
 
+	dane_vrfy_ctx->dane_vrfy_fp[0] = '\0';
 	cert = X509_STORE_CTX_get0_cert(ctx);
-	if (tTd(96, 4))
-		sm_dprintf("dane_verify, cert=%p\n", cert);
+	if (tTd(96, 8))
+		sm_dprintf("dane_verify, cert=%p\n", (void *)cert);
 	if (cert == NULL)
 		return DANE_VRFY_FAIL;
 
-	md = EVP_get_digestbyname("sha256");
-	if (NULL == md)
-		return DANE_VRFY_FAIL;
 	ok = DANE_VRFY_NONE;
-	for (i = 0; i < dane_tlsa->dane_tlsa_n; i++)
+	fp = NULL;
+
+	/*
+	**  If the TLSA RRs would be sorted the two loops below could
+	**  be merged into one and simply change mdalg when it changes
+	**  in dane_tlsa->dane_tlsa_rr.
+	*/
+
+	/* use a different order? */
+	for (mdalg = 0; mdalg < SM_ARRAY_SIZE(dane_mdalgs); mdalg++)
 	{
-		char *p;
-
-		p = dane_tlsa->dane_tlsa_rr[i];
-
-		/* ignore bogus/unsupported TLSA RRs */
-		if (dane_tlsa_chk(p, dane_tlsa->dane_tlsa_len[i],
-				  dane_vrfy_ctx->dane_vrfy_host, false)
-		    != TLSA_OK)
-			continue;
-
-		r = pubkey_fp(cert, md, &fp);
-		if (tTd(96, 4))
-			sm_dprintf("dane_verify, r=%d, len=%d\n", r, dane_tlsa->dane_tlsa_len[i]);
-		if (r != dane_tlsa->dane_tlsa_len[i] - 3)
-			continue;
-		ok = DANE_VRFY_FAIL;
-		if (memcmp(p + 3, fp, r) == 0)
+		SM_FREE(fp);
+		r = 0;
+		for (i = 0; i < dane_tlsa->dane_tlsa_n; i++)
 		{
-			if (tTd(96, 2))
-				sm_dprintf("dane_verify, status=match\n");
-			if (tTd(96, 8))
-			{
-				unsigned char hex[256];
+			char *p;
+			int alg;
 
-				data2hex((unsigned char *)p,
-					dane_tlsa->dane_tlsa_len[i], hex,
-					sizeof(hex));
-				sm_dprintf("dane_verify, pubkey_fp=%s\n", hex);
+			p = dane_tlsa->dane_tlsa_rr[i];
+
+			/* ignore bogus/unsupported TLSA RRs */
+			alg = dane_tlsa_chk(p, dane_tlsa->dane_tlsa_len[i],
+					  dane_vrfy_ctx->dane_vrfy_host, false);
+			if (tTd(96, 8))
+				sm_dprintf("dane_verify, alg=%d, mdalg=%d\n",
+					alg, mdalg);
+			if (alg != mdalg)
+				continue;
+
+			if (NULL == fp)
+			{
+				r = pubkey_fp(cert, dane_mdalgs[mdalg], &fp);
+				if (NULL == fp)
+					return DANE_VRFY_FAIL;
+					/* or continue? */
 			}
-			dane_vrfy_ctx->dane_vrfy_res = DANE_VRFY_OK;
-			return DANE_VRFY_OK;
+
+			/* just for logging */
+			if (r > 0 && fp != NULL)
+			{
+				(void) data2hex((unsigned char *)fp, r,
+					(unsigned char *)dane_vrfy_ctx->dane_vrfy_fp,
+					sizeof(dane_vrfy_ctx->dane_vrfy_fp));
+			}
+
+			if (tTd(96, 4))
+				sm_dprintf("dane_verify, alg=%d, r=%d, len=%d\n",
+					alg, r, dane_tlsa->dane_tlsa_len[i]);
+			if (r != dane_tlsa->dane_tlsa_len[i] - 3)
+				continue;
+			ok = DANE_VRFY_FAIL;
+
+			/*
+			**  Note: Type is NOT checked because only 3-1-x
+			**  is supported.
+			*/
+
+			if (memcmp(p + 3, fp, r) == 0)
+			{
+				if (tTd(96, 2))
+					sm_dprintf("dane_verify, status=match\n");
+				if (tTd(96, 8))
+				{
+					unsigned char hex[256];
+
+					data2hex((unsigned char *)p,
+						dane_tlsa->dane_tlsa_len[i],
+						hex, sizeof(hex));
+					sm_dprintf("dane_verify, pubkey_fp=%s\n"
+						, hex);
+				}
+				dane_vrfy_ctx->dane_vrfy_res = DANE_VRFY_OK;
+				SM_FREE(fp);
+				return DANE_VRFY_OK;
+			}
 		}
 	}
+
+	SM_FREE(fp);
 	dane_vrfy_ctx->dane_vrfy_res = ok;
 	return ok;
 }
-# endif
+# endif /* DANE */
 
 /*
 **  TLS_VERIFY_CB -- verify callback for TLS certificates
@@ -2328,21 +2427,31 @@ tls_verify_cb(ctx, cb_ctx)
 	void *cb_ctx;
 {
 	int ok;
+# if DANE
+	SM_DECTLSI;
+# endif
 
 	/*
-	**  man SSL_CTX_set_cert_verify_callback():
+	**  SSL_CTX_set_cert_verify_callback(3):
 	**  callback should return 1 to indicate verification success
 	**  and 0 to indicate verification failure.
 	*/
 
-# if _FFR_TLSA_DANE
-	ok = dane_verify(ctx, (dane_vrfy_ctx_P) cb_ctx);
-	if (tTd(96, 2))
-		sm_dprintf("dane_verify=%d, res=%d\n", ok,
-			Dane_vrfy_ctx.dane_vrfy_res);
-	if (ok != DANE_VRFY_NONE)
-		return 1;
-# endif
+# if DANE
+	SM_GETTLSI;
+	if (tlsi_ctx != NULL)
+	{
+		dane_vrfy_ctx_P dane_vrfy_ctx;
+
+		dane_vrfy_ctx = &(tlsi_ctx->tlsi_dvc);
+		ok = dane_verify(ctx, dane_vrfy_ctx);
+		if (tTd(96, 2))
+			sm_dprintf("dane_verify=%d, res=%d\n", ok,
+				dane_vrfy_ctx->dane_vrfy_res);
+		if (ok != DANE_VRFY_NONE)
+			return 1;
+	}
+# endif /* DANE */
 
 	ok = X509_verify_cert(ctx);
 	if (ok <= 0)
@@ -2409,7 +2518,7 @@ x509_verify_cb(ok, ctx)
 	int ok;
 	X509_STORE_CTX *ctx;
 {
-	SM_DECTLSI
+	SM_DECTLSI;
 
 	if (ok != 0)
 		return ok;
@@ -2527,10 +2636,10 @@ TLS_set_engine(id, isprefork)
 				"engine=%s, set_default=failed", id);
 		goto error;
 	}
-#ifdef ENGINE_CTRL_CHIL_SET_FORKCHECK
+#  ifdef ENGINE_CTRL_CHIL_SET_FORKCHECK
 	if (strcmp(id, "chil") == 0)
 		ENGINE_ctrl(e, ENGINE_CTRL_CHIL_SET_FORKCHECK, 1, 0, 0);
-#endif
+#  endif
 
 	/* Free our "structural" reference. */
 	ENGINE_free(e);

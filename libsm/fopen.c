@@ -159,7 +159,7 @@ sm_io_open(type, timeout, info, flags, rpool)
 #if SM_RPOOL
 	if (rpool != NULL)
 		sm_rpool_attach_x(rpool, sm_io_fclose, fp);
-#endif /* SM_RPOOL */
+#endif
 
 	return fp;
 }
@@ -311,7 +311,7 @@ sm_io_reopen(type, timeout, info, flags, rpool, fp)
 #if SM_RPOOL
 	if (rpool != NULL)
 		sm_rpool_attach_x(rpool, sm_io_close, fp2);
-#endif /* SM_RPOOL */
+#endif
 
 	return fp2;
 }

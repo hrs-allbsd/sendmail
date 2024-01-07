@@ -18,7 +18,7 @@ SM_RCSID("@(#)$Id: err.c,v 8.206 2013-11-22 20:51:55 ca Exp $")
 #if LDAPMAP
 # include <lber.h>
 # include <ldap.h>			/* for LDAP error codes */
-#endif /* LDAPMAP */
+#endif
 
 static void	putoutmsg __P((char *, bool, bool));
 static void	puterrmsg __P((char *));
@@ -113,7 +113,7 @@ static char	HeldMessageBuf[sizeof(MsgBuf)];	/* for held messages */
 
 #if NAMED_BIND && !defined(NO_DATA)
 # define NO_DATA	NO_ADDRESS
-#endif /* NAMED_BIND && !defined(NO_DATA) */
+#endif
 
 void
 /*VARARGS1*/
@@ -224,19 +224,19 @@ syserr(fmt, va_alist)
 	  case ENOTTY:
 #ifdef EFBIG
 	  case EFBIG:
-#endif /* EFBIG */
+#endif
 #ifdef ESPIPE
 	  case ESPIPE:
-#endif /* ESPIPE */
+#endif
 #ifdef EPIPE
 	  case EPIPE:
-#endif /* EPIPE */
+#endif
 #ifdef ENOBUFS
 	  case ENOBUFS:
-#endif /* ENOBUFS */
+#endif
 #ifdef ESTALE
 	  case ESTALE:
-#endif /* ESTALE */
+#endif
 		printopenfds(true);
 		mci_dump_all(smioout, true);
 		break;
@@ -245,7 +245,7 @@ syserr(fmt, va_alist)
 	{
 #if XLA
 		xla_all_end();
-#endif /* XLA */
+#endif
 		sync_queue_time();
 		if (tTd(0, 1))
 			abort();
@@ -1007,15 +1007,23 @@ fmtmsg(eb, to, num, enhsc, eno, fmt, ap)
 		(void) sm_strlcpyn(eb, spaceleft, 2,
 				   shortenstring(to, MAXSHORTSTR), "... ");
 		spaceleft -= strlen(eb);
+#if _FFR_EAI
+		eb += strlen(eb);
+#else
 		while (*eb != '\0')
 			*eb++ &= 0177;
+#endif
 	}
 
 	/* output the message */
 	(void) sm_vsnprintf(eb, spaceleft, fmt, ap);
 	spaceleft -= strlen(eb);
+#if _FFR_EAI
+	eb += strlen(eb);
+#else
 	while (*eb != '\0')
 		*eb++ &= 0177;
+#endif
 
 	/* output the error code, if any */
 	if (eno != 0)
@@ -1081,11 +1089,11 @@ sm_errstring(errnum)
 #if HASSTRERROR
 	char *err;
 	char errbuf[30];
-#endif /* HASSTRERROR */
+#endif
 #if !HASSTRERROR && !defined(ERRLIST_PREDEFINED)
 	extern char *sys_errlist[];
 	extern int sys_nerr;
-#endif /* !HASSTRERROR && !defined(ERRLIST_PREDEFINED) */
+#endif
 
 	/*
 	**  Handle special network error codes.
@@ -1238,7 +1246,7 @@ sm_errstring(errnum)
 #if LDAPMAP
 	if (errnum >= E_LDAPBASE - E_LDAP_SHIM)
 		return ldap_err2string(errnum - E_LDAPBASE);
-#endif /* LDAPMAP */
+#endif
 
 #if HASSTRERROR
 	err = strerror(errnum);

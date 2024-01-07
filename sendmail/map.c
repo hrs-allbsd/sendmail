@@ -168,43 +168,22 @@ map_parseargs(map, ap)
 	map->map_spacesub = SpaceSub;	/* default value */
 	for (;;)
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
 		switch (*++p)
 		{
-		  case 'N':
-			map->map_mflags |= MF_INCLNULL;
-			map->map_mflags &= ~MF_TRY0NULL;
-			break;
-
-		  case 'O':
-			map->map_mflags &= ~MF_TRY1NULL;
-			break;
-
-		  case 'o':
-			map->map_mflags |= MF_OPTIONAL;
-			break;
-
-		  case 'f':
-			map->map_mflags |= MF_NOFOLDCASE;
-			break;
-
-		  case 'm':
-			map->map_mflags |= MF_MATCHONLY;
-			break;
-
 		  case 'A':
 			map->map_mflags |= MF_APPEND;
 			break;
 
-		  case 'q':
-			map->map_mflags |= MF_KEEPQUOTES;
-			break;
-
 		  case 'a':
 			map->map_app = ++p;
+			break;
+
+		  case 'D':
+			map->map_mflags |= MF_DEFER;
 			break;
 
 		  case 'd':
@@ -221,14 +200,47 @@ map_parseargs(map, ap)
 			}
 			break;
 
-		  case 'T':
-			map->map_tapp = ++p;
+		  case 'f':
+			map->map_mflags |= MF_NOFOLDCASE;
 			break;
 
 		  case 'k':
 			while (isascii(*++p) && isspace(*p))
 				continue;
 			map->map_keycolnm = p;
+			break;
+
+		  case 'm':
+			map->map_mflags |= MF_MATCHONLY;
+			break;
+
+		  case 'N':
+			map->map_mflags |= MF_INCLNULL;
+			map->map_mflags &= ~MF_TRY0NULL;
+			break;
+
+		  case 'O':
+			map->map_mflags &= ~MF_TRY1NULL;
+			break;
+
+		  case 'o':
+			map->map_mflags |= MF_OPTIONAL;
+			break;
+
+		  case 'q':
+			map->map_mflags |= MF_KEEPQUOTES;
+			break;
+
+		  case 'S':
+			map->map_spacesub = *++p;
+			break;
+
+		  case 'T':
+			map->map_tapp = ++p;
+			break;
+
+		  case 't':
+			map->map_mflags |= MF_NODEFER;
 			break;
 
 		  case 'v':
@@ -258,24 +270,11 @@ map_parseargs(map, ap)
 			}
 			break;
 
-		  case 't':
-			map->map_mflags |= MF_NODEFER;
-			break;
-
-
-		  case 'S':
-			map->map_spacesub = *++p;
-			break;
-
-		  case 'D':
-			map->map_mflags |= MF_DEFER;
-			break;
-
 		  default:
 			syserr("Illegal option %c map %s", *p, map->map_mname);
 			break;
 		}
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 			p++;
 		if (*p != '\0')
 			*p++ = '\0';
@@ -292,14 +291,14 @@ map_parseargs(map, ap)
 	if (*p != '\0')
 	{
 		map->map_file = p;
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 			p++;
 		if (*p != '\0')
 			*p++ = '\0';
 		map->map_file = newstr(map->map_file);
 	}
 
-	while (*p != '\0' && isascii(*p) && isspace(*p))
+	while (*p != '\0' && SM_ISSPACE(*p))
 		p++;
 	if (*p != '\0')
 		map->map_rebuild = newstr(p);
@@ -1049,7 +1048,7 @@ dns_map_parseargs(map,args)
 
 	for (;;)
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -1134,7 +1133,7 @@ dns_map_parseargs(map,args)
 
 		  case 'S':
 #if defined(RES_USE_EDNS0) && defined(RES_USE_DNSSEC)
-			map_p->dns_m_options |= RES_USE_EDNS0|RES_USE_DNSSEC;
+			map_p->dns_m_options |= SM_RES_DNSSEC;
 #endif
 			break;
 
@@ -1199,7 +1198,7 @@ dns_map_parseargs(map,args)
 			break;
 
 		}
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 			p++;
 		if (*p != '\0')
 			*p++ = '\0';
@@ -2743,9 +2742,6 @@ cdb_map_open(map, mode)
 
 	/*
 	**  Notes:
-	**  This code does not use a temporary file to create
-	**  the aliases map (and invoke rename() at the end),
-	**  but writes the CDB "in place" -- just like the NEWDB code.
 	**  If a temporary file is used, then there must be some check
 	**  that the rename() is "safe" (i.e., does not overwrite some
 	**  "other" file created by an attacker).
@@ -2767,6 +2763,14 @@ cdb_map_open(map, mode)
 	sff = SFF_ROOTOK|SFF_REGONLY;
 	if (mode == O_RDWR)
 	{
+		if (sm_strlcat(buf, ".tmp", sizeof buf) >= sizeof buf)
+		{
+			errno = 0;
+			if (!bitset(MF_OPTIONAL, map->map_mflags))
+				syserr("cdb map \"%s\": map file %s name too long",
+					map->map_mname, map->map_file);
+			return false;
+		}
 		sff |= SFF_CREAT;
 		if (!bitnset(DBS_WRITEMAPTOSYMLINK, DontBlameSendmail))
 			sff |= SFF_NOSLINK;
@@ -2840,7 +2844,7 @@ cdb_map_open(map, mode)
 	/* only for aliases! */
 	if (mode == O_RDWR)
 	{
-  		struct cdb_make *cdbmp;
+		struct cdb_make *cdbmp;
 
 		cdbmp = (struct cdb_make *) xalloc(sizeof(*cdbmp));
 		status = cdb_make_start(cdbmp, fd);
@@ -2945,7 +2949,7 @@ cdb_map_store(map, lhs, rhs)
 	char *lhs;
 	char *rhs;
 {
-  	struct cdb_make *cdbmp;
+	struct cdb_make *cdbmp;
 	size_t klen;
 	size_t vlen;
 	int status;
@@ -2983,7 +2987,7 @@ cdb_map_close(map)
 	MAP * map;
 {
 	struct cdb *cdbp;
-  	struct cdb_make *cdbmp;
+	struct cdb_make *cdbmp;
 	int fd;
 
 	fd = -1;
@@ -2991,7 +2995,7 @@ cdb_map_close(map)
 	if (cdbp != NULL)
 	{
 		if (tTd(38, 20))
-			sm_dprintf("cdb_map_close(%p)\n", cdbp);
+			sm_dprintf("cdb_map_close(%p)\n", (void *)cdbp);
 		fd = cdb_fileno(cdbp);
 		cdb_free(cdbp);
 		sm_free(cdbp);
@@ -3000,23 +3004,42 @@ cdb_map_close(map)
 	cdbmp = map->map_db2;
 	if (cdbmp != NULL)
 	{
+		char tmpfn[MAXPATHLEN], cdbfn[MAXPATHLEN];
+
 		if (tTd(38, 20))
-			sm_dprintf("cdb_map_close(%p)\n", cdbmp);
+			sm_dprintf("cdb_map_close(%p)\n", (void *)cdbmp);
 		fd = cdb_fileno(cdbmp);
 
 		/* write out the distinguished alias */
 		/* XXX Why isn't this in a common place? */
 		cdb_map_store(map, "@", "@");
 
-  		if (cdb_make_finish(cdbmp) != 0)
+		if (cdb_make_finish(cdbmp) != 0)
 			syserr("cdb: failed to write %s", map->map_file);
 		if (fd >=0)
 		{
 			if (fsync(fd) == -1)
-				syserr("cdb: fsync failed on %s", map->map_file);
+				syserr("cdb: fsync(%s) failed", map->map_file);
 			if (close(fd) == -1)
-				syserr("cdb: close failed on %s", map->map_file);
+				syserr("cdb: close(%s) failed", map->map_file);
 		}
+
+		if (!smdb_add_extension(cdbfn, sizeof(cdbfn), map->map_file,
+					CDBext))
+		{
+			syserr("cdb: add extension to %s failed",
+				map->map_file);
+		}
+		if (sm_strlcpy(tmpfn, cdbfn, sizeof tmpfn) >= sizeof tmpfn ||
+		    sm_strlcat(tmpfn, ".tmp", sizeof tmpfn) >= sizeof tmpfn)
+		{
+			syserr("cdb: set temp filename for %s failed",
+				map->map_file);
+		}
+		if (tTd(38, 80))
+			sm_dprintf("rename(%s, %s)\n", tmpfn, cdbfn);
+		if (rename(tmpfn, cdbfn) == -1)
+			syserr("cdb: rename(%s, %s) failed", tmpfn, cdbfn);
 		sm_free(cdbmp);
 		cdbmp = NULL;
 	}
@@ -3161,7 +3184,7 @@ nis_map_lookup(map, name, av, statp)
 	}
 	if (yperr == YPERR_KEY && bitset(MF_TRY1NULL, map->map_mflags))
 	{
-		SM_FREE_CLR(vp);
+		SM_FREE(vp);
 		buflen++;
 		yperr = yp_match(map->map_domain, map->map_file, keybuf, buflen,
 			     &vp, &vsize);
@@ -3235,7 +3258,7 @@ nis_getcanonname(name, hbsize, statp)
 	}
 	if (yperr == YPERR_KEY && try1null)
 	{
-		SM_FREE_CLR(vp);
+		SM_FREE(vp);
 		keylen++;
 		yperr = yp_match(yp_domain, "hosts.byname", nbuf, keylen,
 			     &vp, &vsize);
@@ -4388,15 +4411,15 @@ ldapmap_parseargs(map, args)
 		map->map_coldelim = ' ';
 	}
 
-# if _FFR_LDAP_NETWORK_TIMEOUT
+# if LDAP_NETWORK_TIMEOUT
 	if (0 == lmap->ldap_networktmo)
-		lmap->ldap_networktmo = (_FFR_LDAP_NETWORK_TIMEOUT > 1)
-					? _FFR_LDAP_NETWORK_TIMEOUT : 60;
+		lmap->ldap_networktmo = (LDAP_NETWORK_TIMEOUT > 1)
+					? LDAP_NETWORK_TIMEOUT : 60;
 # endif
 
 	for (;;)
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -4489,13 +4512,13 @@ ldapmap_parseargs(map, args)
 			lmap->ldap_base = p;
 			break;
 
-# if _FFR_LDAP_NETWORK_TIMEOUT
+# if LDAP_NETWORK_TIMEOUT
 		  case 'c':		/* network (connect) timeout */
 			while (isascii(*++p) && isspace(*p))
 				continue;
 			lmap->ldap_networktmo = atoi(p);
 			break;
-# endif /* _FFR_LDAP_NETWORK_TIMEOUT */
+# endif /* LDAP_NETWORK_TIMEOUT */
 
 		  case 'd':		/* Dn to bind to server as */
 			while (isascii(*++p) && isspace(*p))
@@ -4759,7 +4782,7 @@ ldapmap_parseargs(map, args)
 		}
 
 		/* need to account for quoted strings here */
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 		{
 			if (*p == '"')
 			{
@@ -4944,7 +4967,7 @@ ldapmap_parseargs(map, args)
 		{
 			char *v;
 
-			while (isascii(*p) && isspace(*p))
+			while (SM_ISSPACE(*p))
 				p++;
 			if (*p == '\0')
 				break;
@@ -5121,8 +5144,8 @@ ldapmap_set_defaults(spec)
 	    map.map_tapp != NULL)
 	{
 		syserr("readcf: option LDAPDefaultSpec: Do not set non-LDAP specific flags");
-		SM_FREE_CLR(map.map_app);
-		SM_FREE_CLR(map.map_tapp);
+		SM_FREE(map.map_app);
+		SM_FREE(map.map_tapp);
 	}
 
 	if (LDAPDefaults->ldap_filter != NULL)
@@ -5203,7 +5226,7 @@ ph_map_parseargs(map, args)
 	map->map_mflags |= MF_TRY0NULL|MF_TRY1NULL;
 	for (;;)
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -5281,7 +5304,7 @@ ph_map_parseargs(map, args)
 		}
 
 		/* try to account for quoted strings */
-		done = isascii(*p) && isspace(*p);
+		done = SM_ISSPACE(*p);
 		while (*p != '\0' && !done)
 		{
 			if (*p == '"')
@@ -5293,7 +5316,7 @@ ph_map_parseargs(map, args)
 			}
 			else
 				p++;
-			done = isascii(*p) && isspace(*p);
+			done = SM_ISSPACE(*p);
 		}
 
 		if (*p != '\0')
@@ -5598,7 +5621,7 @@ syslog_map_parseargs(map, args)
 	/* there is no check whether there is really an argument */
 	while (*p != '\0')
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -5616,12 +5639,12 @@ syslog_map_parseargs(map, args)
 		}
 		else if (*p == 'L')
 		{
-			while (*++p != '\0' && isascii(*p) && isspace(*p))
+			while (*++p != '\0' && SM_ISSPACE(*p))
 				continue;
 			if (*p == '\0')
 				break;
 			priority = p;
-			while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+			while (*p != '\0' && !(SM_ISSPACE(*p)))
 				p++;
 			if (*p != '\0')
 				*p++ = '\0';
@@ -5737,7 +5760,7 @@ dprintf_map_parseargs(map, args)
 	/* there is no check whether there is really an argument */
 	while (*p != '\0')
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -5755,12 +5778,12 @@ dprintf_map_parseargs(map, args)
 		}
 		else if (*p == 'd')
 		{
-			while (*++p != '\0' && isascii(*p) && isspace(*p))
+			while (*++p != '\0' && SM_ISSPACE(*p))
 				continue;
 			if (*p == '\0')
 				break;
 			dbg_level = p;
-			while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+			while (*p != '\0' && !(SM_ISSPACE(*p)))
 				p++;
 			if (*p != '\0')
 				*p++ = '\0';
@@ -6908,7 +6931,7 @@ seq_map_parse(map, ap)
 		STAB *s;
 
 		/* find beginning of map name */
-		while (isascii(*ap) && isspace(*ap))
+		while (SM_ISSPACE(*ap))
 			ap++;
 		for (p = ap;
 		     (isascii(*p) && isalnum(*p)) || *p == '_' || *p == '.';
@@ -7320,7 +7343,7 @@ regex_map_init(map, ap)
 
 	for (;;)
 	{
-		while (isascii(*p) && isspace(*p))
+		while (SM_ISSPACE(*p))
 			p++;
 		if (*p != '-')
 			break;
@@ -7369,7 +7392,7 @@ regex_map_init(map, ap)
 			break;
 
 		}
-		while (*p != '\0' && !(isascii(*p) && isspace(*p)))
+		while (*p != '\0' && !(SM_ISSPACE(*p)))
 			p++;
 		if (*p != '\0')
 			*p++ = '\0';

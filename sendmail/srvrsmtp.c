@@ -15,7 +15,7 @@
 #if MILTER
 # include <libmilter/mfapi.h>
 # include <libmilter/mfdef.h>
-#endif /* MILTER */
+#endif
 
 SM_RCSID("@(#)$Id: srvrsmtp.c,v 8.1016 2013-11-22 20:51:56 ca Exp $")
 
@@ -25,11 +25,11 @@ SM_RCSID("@(#)$Id: srvrsmtp.c,v 8.1016 2013-11-22 20:51:56 ca Exp $")
 #if SASL || STARTTLS
 # include <tls.h>
 # include "sfsasl.h"
-#endif /* SASL || STARTTLS */
+#endif
 #if SASL
 # define ENC64LEN(l)	(((l) + 2) * 4 / 3 + 1)
 static int saslmechs __P((sasl_conn_t *, char **));
-#endif /* SASL */
+#endif
 #if STARTTLS
 # include <openssl/err.h>
 # include <sysexits.h>
@@ -46,7 +46,7 @@ static bool	tls_ok_srv = false;
 
 #if _FFR_DM_ONE
 static bool	NotFirstDelivery = false;
-#endif /* _FFR_DM_ONE */
+#endif
 
 /* server features */
 #define SRV_NONE	0x0000	/* none... */
@@ -62,11 +62,14 @@ static bool	NotFirstDelivery = false;
 # define SRV_OFFER_PIPE	0x0100	/* offer PIPELINING */
 # if _FFR_NO_PIPE
 #  define SRV_NO_PIPE	0x0200	/* disable PIPELINING, sleep if used */
-# endif /* _FFR_NO_PIPE */
+# endif
 #endif /* PIPELINING */
 #define SRV_REQ_AUTH	0x0400	/* require AUTH */
 #define SRV_REQ_SEC	0x0800	/* require security - equiv to AuthOptions=p */
 #define SRV_TMP_FAIL	0x1000	/* ruleset caused a temporary failure */
+#if _FFR_EAI
+# define SRV_OFFER_EAI	0x2000	/* offer SMTPUTF* */
+#endif
 
 static unsigned int	srvfeatures __P((ENVELOPE *, char *, unsigned int));
 
@@ -78,7 +81,6 @@ static char	*skipword __P((char *volatile, char *));
 static void	setup_smtpd_io __P((void));
 
 #if SASL
-# if _FFR_AUTH_FAIL_LOG_USER
 #  ifndef MAX_AUTH_USER_LEN
 #   define MAX_AUTH_USER_LEN 256
 #  endif
@@ -105,12 +107,6 @@ static void get_sasl_user __P((char *, unsigned int, const char *, char *out, si
 		if ('\0' == auth_user[0])	\
 			SET_AUTH_USER;
 #  define LOG_AUTH_FAIL_USER ", user=", (int)MAX_AUTH_LOG_LEN, auth_user
-# else /* _FFR_AUTH_FAIL_LOG_USER */
-#  define LOG_AUTH_FAIL_USER "", 0, ""
-#  define SET_AUTH_USER
-#  define SET_AUTH_USER_CONDITIONALLY
-#  define SET_AUTH_USER_TMP(s, len)	
-# endif /* _FFR_AUTH_FAIL_LOG_USER */
 # if SASL >= 20000
 static int reset_saslconn __P((sasl_conn_t **_conn, char *_hostname,
 				char *_remoteip, char *_localip,
@@ -160,8 +156,31 @@ extern ENVELOPE	BlankEnvelope;
 		macdefine(&e->e_macro, A_TEMP, macid("{nbadrcpts}"), buf); \
 	} while (0)
 
-#define SKIP_SPACE(s)	while (isascii(*s) && isspace(*s))	\
+#define SKIP_SPACE(s)	while (SM_ISSPACE(*s))	\
 				(s)++
+
+#if _FFR_EAI
+/*
+**  ADDR_IS_ASCII -- check whether an address is 100% printable ASCII
+**
+**	Parameters:
+**		a -- an address (or other string)
+**
+**	Returns:
+**		TRUE if a is non-NULL and points to only printable ASCII
+**		FALSE if a is NULL and points to printable ASCII
+**		FALSE if a is non-NULL and points to something containing 8-bittery
+*/
+
+bool
+addr_is_ascii(a)
+	const char * a;
+{
+	while (a != NULL && *a != '\0' && *a >= ' ' && (unsigned char)*a < 127)
+		a++;
+	return (a != NULL && *a == '\0');
+}
+#endif
 
 /*
 **  PARSE_ESMTP_ARGS -- parse ESMTP arguments (for MAIL, RCPT)
@@ -458,10 +477,10 @@ struct cmd
 #define CMDETRN	12	/* etrn -- flush queue */
 #if SASL
 # define CMDAUTH	13	/* auth -- SASL authenticate */
-#endif /* SASL */
+#endif
 #if STARTTLS
 # define CMDSTLS	14	/* STARTTLS -- start TLS session */
-#endif /* STARTTLS */
+#endif
 /* non-standard commands */
 #define CMDVERB	17	/* verb -- go into verbose mode */
 /* unimplemented commands from RFC 821 */
@@ -497,10 +516,10 @@ static struct cmd	CmdTab[] =
 	{ "turn",	CMDUNIMPL	},
 #if SASL
 	{ "auth",	CMDAUTH,	},
-#endif /* SASL */
+#endif
 #if STARTTLS
 	{ "starttls",	CMDSTLS,	},
-#endif /* STARTTLS */
+#endif
     /* remaining commands are here only to trap and log attempts to use them */
 	{ "showq",	CMDDBGQSHOW	},
 	{ "debug",	CMDDBGDEBUG	},
@@ -513,19 +532,19 @@ static char	*CurSmtpClient;		/* who's at the other end of channel */
 
 #ifndef MAXBADCOMMANDS
 # define MAXBADCOMMANDS 25	/* maximum number of bad commands */
-#endif /* ! MAXBADCOMMANDS */
+#endif
 #ifndef MAXHELOCOMMANDS
 # define MAXHELOCOMMANDS 3	/* max HELO/EHLO commands before slowdown */
-#endif /* ! MAXHELOCOMMANDS */
+#endif
 #ifndef MAXVRFYCOMMANDS
 # define MAXVRFYCOMMANDS 6	/* max VRFY/EXPN commands before slowdown */
-#endif /* ! MAXVRFYCOMMANDS */
+#endif
 #ifndef MAXETRNCOMMANDS
 # define MAXETRNCOMMANDS 8	/* max ETRN commands before slowdown */
-#endif /* ! MAXETRNCOMMANDS */
+#endif
 #ifndef MAXTIMEOUT
 # define MAXTIMEOUT (4 * 60)	/* max timeout for bad commands */
-#endif /* ! MAXTIMEOUT */
+#endif
 
 /*
 **  Maximum shift value to compute timeout for bad commands.
@@ -534,10 +553,10 @@ static char	*CurSmtpClient;		/* who's at the other end of channel */
 
 #ifndef MAXSHIFT
 # define MAXSHIFT 8
-#endif /* ! MAXSHIFT */
+#endif
 #if MAXSHIFT > 31
  ERROR _MAXSHIFT > 31 is invalid
-#endif /* MAXSHIFT */
+#endif
 
 
 #if MAXBADCOMMANDS > 0
@@ -555,7 +574,7 @@ static char	*CurSmtpClient;		/* who's at the other end of channel */
 #if SM_HEAP_CHECK
 static SM_DEBUG_T DebugLeakSmtp = SM_DEBUG_INITIALIZER("leak_smtp",
 	"@(#)$Debug: leak_smtp - trace memory leaks during SMTP processing $");
-#endif /* SM_HEAP_CHECK */
+#endif
 
 typedef struct
 {
@@ -763,10 +782,21 @@ do								\
 #else
 # define auth_active	false
 #endif
+#if _FFR_EAI
+#define GET_PROTOCOL()					\
+	(e->e_smtputf8					\
+	    ? (auth_active				\
+		? (tls_active ? "UTF8SMTPSA" : "UTF8SMTPA") \
+		: (tls_active ? "UTF8SMTPS"  : "UTF8SMTP")) \
+	    : (auth_active				\
+		? (tls_active ? "ESMTPSA" : "ESMTPA")	\
+		: (tls_active ? "ESMTPS"  : "ESMTP")))
+#else /* _FFR_EAI */
 #define GET_PROTOCOL()					\
 	(auth_active					\
 	    ? (tls_active ? "ESMTPSA" : "ESMTPA")	\
 	    : (tls_active ? "ESMTPS"  : "ESMTP"))
+#endif /* _FFR_EAI */
 
 static bool SevenBitInput_Saved;	/* saved version of SevenBitInput */
 
@@ -822,10 +852,8 @@ smtp(nullserver, d_flags, e)
 	volatile int authenticating;
 	char *user;
 	char *in, *out2;
-# if _FFR_AUTH_FAIL_LOG_USER
 	char auth_user[MAX_AUTH_USER_LEN], auth_user_tmp[MAX_AUTH_USER_LEN];
 	unsigned int auth_user_len;
-# endif
 # if SASL >= 20000
 	char *auth_id = NULL;
 	const char *out;
@@ -886,7 +914,7 @@ smtp(nullserver, d_flags, e)
 	smtp.sm_milterize = (nullserver == NULL);
 	smtp.sm_milterlist = false;
 	addr = NULL;
-#endif /* MILTER */
+#endif
 
 	/* setup I/O fd correctly for the SMTP server */
 	setup_smtpd_io();
@@ -945,7 +973,10 @@ smtp(nullserver, d_flags, e)
 		| (bitnset(D_NOTLS, d_flags) ? SRV_NONE : SRV_OFFER_TLS)
 		| (bitset(TLS_I_NO_VRFY, TLS_Srv_Opts) ? SRV_NONE
 						       : SRV_VRFY_CLT)
-#endif /* STARTTLS */
+#endif
+#if _FFR_EAI
+		| SRV_OFFER_EAI
+#endif /* _FFR_EAI */
 		;
 	if (nullserver == NULL)
 	{
@@ -1105,7 +1136,7 @@ smtp(nullserver, d_flags, e)
 # if 0
 		macdefine(&BlankEnvelope.e_macro, A_PERM,
 			macid("{auth_author}"), NULL);
-# endif /* 0 */
+# endif
 
 		/* set properties */
 		(void) memset(&ssp, '\0', sizeof(ssp));
@@ -1427,14 +1458,14 @@ smtp(nullserver, d_flags, e)
 	while ((id = p) != NULL && (p = strchr(id, '\n')) != NULL)
 	{
 		*p++ = '\0';
-		if (isascii(*id) && isspace(*id))
+		if (SM_ISSPACE(*id))
 			id++;
 		(void) sm_strlcpyn(cmdbuf, sizeof(cmdbuf), 2, greetcode, "-%s");
 		message(cmdbuf, id);
 	}
 	if (id != NULL)
 	{
-		if (isascii(*id) && isspace(*id))
+		if (SM_ISSPACE(*id))
 			id++;
 		(void) sm_strlcpyn(cmdbuf, sizeof(cmdbuf), 2, greetcode, " %s");
 		message(cmdbuf, id);
@@ -1495,7 +1526,7 @@ smtp(nullserver, d_flags, e)
 #if MILTER
 			/* close out milter filters */
 			milter_quit(e);
-#endif /* MILTER */
+#endif
 
 			message("421 4.4.1 %s Lost input channel from %s",
 				MyHostName, CurSmtpClient);
@@ -1550,7 +1581,7 @@ smtp(nullserver, d_flags, e)
 				cmdlen = strlen(http_cmd);
 				if (cmdlen < inplen &&
 				    sm_strncasecmp(inp, http_cmd, cmdlen) == 0 &&
-				    isascii(inp[cmdlen]) && isspace(inp[cmdlen]))
+				    SM_ISSPACE(inp[cmdlen]))
 				{
 					/* Open proxy, drop it */
 					message("421 4.7.0 %s Rejecting open proxy %s",
@@ -1682,7 +1713,7 @@ smtp(nullserver, d_flags, e)
 # if 0
 				/* get realm? */
 				sasl_getprop(conn, SASL_REALM, (void **) &data);
-# endif /* 0 */
+# endif
 
 				/* get security strength (features) */
 				result = sasl_getprop(conn, SASL_SSF,
@@ -1825,11 +1856,11 @@ smtp(nullserver, d_flags, e)
 			sm_syslog(LOG_INFO, e->e_id, "<-- %s", inp);
 
 		/* break off command */
-		for (p = inp; isascii(*p) && isspace(*p); p++)
+		for (p = inp; SM_ISSPACE(*p); p++)
 			continue;
 		cmd = cmdbuf;
 		while (*p != '\0' &&
-		       !(isascii(*p) && isspace(*p)) &&
+		       !(SM_ISSPACE(*p)) &&
 		       cmd < &cmdbuf[sizeof(cmdbuf) - 2])
 			*cmd++ = *p++;
 		*cmd = '\0';
@@ -1978,8 +2009,7 @@ smtp(nullserver, d_flags, e)
 				if (isspace(*q))
 				{
 					*q = '\0';
-					while (*++q != '\0' &&
-					       isascii(*q) && isspace(*q))
+					while (*++q != '\0' && SM_ISSPACE(*q))
 						continue;
 					*(q - 1) = '\0';
 					ismore = (*q != '\0');
@@ -2156,7 +2186,7 @@ smtp(nullserver, d_flags, e)
 			/*
 			**  XXX do we need a temp key ?
 			*/
-# endif /* TLS_NO_RSA */
+# endif
 
 # if TLS_VRFY_PER_CTX
 			/*
@@ -2605,6 +2635,10 @@ smtp(nullserver, d_flags, e)
 			if (SendMIMEErrors && bitset(SRV_OFFER_DSN, features))
 				message("250-DSN");
 #endif
+#if _FFR_EAI
+			if (bitset(SRV_OFFER_EAI, features))
+				message("250-SMTPUTF8");
+#endif /* _FFR_EAI */
 			if (bitset(SRV_OFFER_ETRN, features))
 				message("250-ETRN");
 #if SASL
@@ -2719,7 +2753,7 @@ smtp(nullserver, d_flags, e)
 			extern char *FullName;
 
 			QuickAbort = true;
-			SM_FREE_CLR(FullName);
+			SM_FREE(FullName);
 
 			/* must parse sender first */
 			delimptr = NULL;
@@ -2779,6 +2813,21 @@ smtp(nullserver, d_flags, e)
 			if (Errors > 0)
 				sm_exc_raisenew_x(&EtypeQuickAbort, 1);
 
+#if _FFR_EAI
+			if (e->e_smtputf8)
+			{
+				protocol = GET_PROTOCOL();
+				macdefine(&e->e_macro, A_PERM, 'r', protocol);
+			}
+
+			/* UTF8 addresses are only legal with SMTPUTF8 */
+			if (!e->e_smtputf8 && !addr_is_ascii(e->e_from.q_paddr))
+			{
+				usrerr("553 5.6.7 That address requires SMTPUTF8");
+				sm_exc_raisenew_x(&EtypeQuickAbort, 1);
+			}
+#endif
+
 #if SASL
 # if _FFR_AUTH_PASSING
 			/* set the default AUTH= if the sender didn't */
@@ -2806,7 +2855,7 @@ smtp(nullserver, d_flags, e)
 			/* make the "real" sender address available */
 			macdefine(&e->e_macro, A_TEMP, macid("{mail_from}"),
 				  e->e_from.q_paddr);
-#endif /* _FFR_MAIL_MACRO */
+#endif
 			if (rscheck("check_mail", addr,
 				    NULL, e, RSF_RMCOMM|RSF_COUNT, 3,
 				    NULL, e->e_id, NULL, NULL) != EX_OK ||
@@ -2977,7 +3026,7 @@ smtp(nullserver, d_flags, e)
 			if (!SM_IS_INTERACTIVE(e->e_sendmode)
 #if _FFR_DM_ONE
 			    && (NotFirstDelivery || SM_DM_ONE != e->e_sendmode)
-#endif /* _FFR_DM_ONE */
+#endif
 			   )
 				e->e_flags |= EF_VRFYONLY;
 
@@ -3016,6 +3065,13 @@ smtp(nullserver, d_flags, e)
 				usrerr("501 5.0.0 Missing recipient");
 				goto rcpt_done;
 			}
+#if _FFR_EAI
+			if (!e->e_smtputf8 && !addr_is_ascii(a->q_paddr))
+			{
+				usrerr("553 5.6.7 Address requires SMTPUTF8");
+				goto rcpt_done;
+			}
+#endif
 
 			if (delimptr != NULL && *delimptr != '\0')
 				*delimptr++ = '\0';
@@ -3309,7 +3365,7 @@ smtp(nullserver, d_flags, e)
 			vrfyqueue = NULL;
 			if (vrfy)
 				e->e_flags |= EF_VRFYONLY;
-			while (*p != '\0' && isascii(*p) && isspace(*p))
+			while (*p != '\0' && SM_ISSPACE(*p))
 				p++;
 			if (*p == '\0')
 			{
@@ -4571,9 +4627,9 @@ skipword(p, w)
 	q = p;
 
 	/* find end of word */
-	while (*p != '\0' && *p != ':' && !(isascii(*p) && isspace(*p)))
+	while (*p != '\0' && *p != ':' && !(SM_ISSPACE(*p)))
 		p++;
-	while (isascii(*p) && isspace(*p))
+	while (SM_ISSPACE(*p))
 		*p++ = '\0';
 	if (*p != ':')
 	{
@@ -4908,6 +4964,17 @@ mail_esmtp_args(a, kp, vp, e)
 
 		/* XXX: check whether more characters follow? */
 	}
+#if _FFR_EAI
+	else if (sm_strcasecmp(kp, "smtputf8") == 0)
+	{
+		if (!bitset(SRV_OFFER_EAI, e->e_features))
+		{
+			usrerr("504 5.7.0 Sorry, SMTPUTF8 not supported/enabled");
+			/* NOTREACHED */
+		}
+		e->e_smtputf8 = true;
+	}
+#endif
 	else
 	{
 		usrerr("555 5.5.4 %s parameter unrecognized", kp);
@@ -5262,11 +5329,14 @@ static struct
 	{ 'C',	SRV_REQ_SEC	},
 	{ 'D',	SRV_OFFER_DSN	},
 	{ 'E',	SRV_OFFER_ETRN	},
+#if _FFR_EAI
+	{ 'I',	SRV_OFFER_EAI	},
+#endif
 	{ 'L',	SRV_REQ_AUTH	},
 #if PIPELINING
 # if _FFR_NO_PIPE
 	{ 'N',	SRV_NO_PIPE	},
-# endif /* _FFR_NO_PIPE */
+# endif
 	{ 'P',	SRV_OFFER_PIPE	},
 #endif /* PIPELINING */
 	{ 'R',	SRV_VRFY_CLT	},	/* same as V; not documented */
@@ -5542,7 +5612,6 @@ reset_saslconn(sasl_conn_t **conn, char *hostname,
 	return SASL_OK;
 }
 
-# if _FFR_AUTH_FAIL_LOG_USER
 /*
 **  GET_SASL_USER -- extract user part from SASL reply
 **
@@ -5576,7 +5645,7 @@ get_sasl_user(val, len, auth_type, user, user_len)
 	SM_ASSERT(user_len > 0);
 
 	*user = '\0';
-	if (NULL == auth_type || '\0' == auth_type)
+	if (NULL == auth_type || '\0' == *auth_type)
 		return;
 	if (0 == len)
 		return;
@@ -5678,5 +5747,4 @@ get_sasl_user(val, len, auth_type, user, user_len)
 
 	(void) sm_strlcpy(user, val, user_len);
 }
-# endif /* _FFR_AUTH_FAIL_LOG_USER */
 #endif /* SASL */

@@ -15,7 +15,7 @@ SM_RCSID("@(#)$Id: engine.c,v 8.168 2013-11-22 20:51:36 ca Exp $")
 
 #if NETINET || NETINET6
 # include <arpa/inet.h>
-#endif /* NETINET || NETINET6 */
+#endif
 
 /* generic argument for functions in the command table */
 struct arg_struct
@@ -112,7 +112,7 @@ static void	mi_clr_symlist __P((SMFICTX_PTR));
 
 #if _FFR_WORKERS_POOL
 static bool     mi_rd_socket_ready __P((int));
-#endif /* _FFR_WORKERS_POOL */
+#endif
 
 /* states */
 #define ST_NONE	(-1)
@@ -458,7 +458,7 @@ mi_engine(ctx)
 	if (ctx->ctx_state != ST_QUIT
 #if _FFR_WORKERS_POOL
 	   && ret != MI_CONTINUE
-#endif /* _FFR_WORKERS_POOL */
+#endif
 	   )
 	{
 		if ((fi_close = ctx->ctx_smfi->xxfi_close) != NULL)
@@ -468,7 +468,7 @@ mi_engine(ctx)
 		free(buf);
 #if !_FFR_WORKERS_POOL
 	mi_clr_macros(ctx, 0);
-#endif /* _FFR_WORKERS_POOL */
+#endif
 	return ret;
 }
 
@@ -703,8 +703,12 @@ sendreply(r, sd, timeout_ptr, ctx)
 				      (void *) &v, MILTER_LEN_BYTES);
 			len = milter_addsymlist(ctx, buf, &buffer);
 			if (buffer != NULL)
+			{
 				ret = mi_wr_cmd(sd, timeout_ptr, SMFIC_OPTNEG,
 						buffer, len);
+				if (buffer != buf)
+					free(buffer);
+			}
 			else
 				ret = MI_FAILURE;
 		}
@@ -843,7 +847,7 @@ st_optionneg(g)
 	SMFICTX_PTR ctx;
 #if _FFR_MILTER_CHECK
 	bool testmode = false;
-#endif /* _FFR_MILTER_CHECK */
+#endif
 	int (*fi_negotiate) __P((SMFICTX *,
 					unsigned long, unsigned long,
 					unsigned long, unsigned long,
@@ -1000,7 +1004,7 @@ st_optionneg(g)
 		testmode = bitset(SMFIP_TEST, m_pflags);
 		if (testmode)
 			m_pflags &= ~SMFIP_TEST;
-#endif /* _FFR_MILTER_CHECK */
+#endif
 
 		/*
 		**  Types of protocol flags (pflags):
@@ -1868,9 +1872,9 @@ mi_rd_socket_ready (sd)
 	int nerr = 0;
 #if SM_CONF_POLL
 	struct pollfd pfd;
-#else /* SM_CONF_POLL */
+#else
 	fd_set	rd_set, exc_set;
-#endif /* SM_CONF_POLL */
+#endif
 
 	do
 	{
@@ -1912,8 +1916,8 @@ mi_rd_socket_ready (sd)
 
 #if SM_CONF_POLL
 	return (pfd.revents != 0);
-#else /* SM_CONF_POLL */
+#else
 	return FD_ISSET(sd, &rd_set) || FD_ISSET(sd, &exc_set);
-#endif /* SM_CONF_POLL */
+#endif
 }
 #endif /* _FFR_WORKERS_POOL */

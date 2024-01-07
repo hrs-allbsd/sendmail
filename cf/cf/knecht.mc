@@ -46,7 +46,7 @@ define(`CYRUS_MAILER_PATH', `/usr/local/cyrus/bin/deliver')
 define(`CYRUS_MAILER_FLAGS', `fAh5@/:|')
 
 FEATURE(`access_db')
-FEATURE(`blacklist_recipients')
+FEATURE(`blocklist_recipients')
 FEATURE(`local_lmtp')
 FEATURE(`virtusertable')
 FEATURE(`mailertable')

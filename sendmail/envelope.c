@@ -105,7 +105,7 @@ newenvelope(e, parent, rpool)
 	e->e_ctime = curtime();
 #if _FFR_SESSID
 	e->e_sessid = e->e_id;
-#endif /* _FFR_SESSID */
+#endif
 	if (parent != NULL)
 	{
 		e->e_msgpriority = parent->e_msgsize;
@@ -113,7 +113,7 @@ newenvelope(e, parent, rpool)
 		if (parent->e_sessid != NULL)
 			e->e_sessid = sm_rpool_strdup_x(rpool,
 							parent->e_sessid);
-#endif /* _FFR_SESSID */
+#endif
 
 		if (parent->e_quarmsg == NULL)
 		{
@@ -189,7 +189,7 @@ dropenvelope(e, fulldrop, split)
 
 	if (tTd(50, 1))
 	{
-		sm_dprintf("dropenvelope %p: id=", e);
+		sm_dprintf("dropenvelope %p: id=", (void *)e);
 		xputs(sm_debug_file(), e->e_id);
 		sm_dprintf(", flags=");
 		printenvflags(e);
@@ -264,7 +264,7 @@ dropenvelope(e, fulldrop, split)
 #if _FFR_PROXY
 		if (queueit && e->e_sendmode == SM_PROXY)
 			queueit = false;
-#endif /* _FFR_PROXY */
+#endif
 
 		/* see if a notification is needed */
 		if (bitset(QPINGONFAILURE, q->q_flags) &&
@@ -380,7 +380,7 @@ dropenvelope(e, fulldrop, split)
 #if _FFR_NODELAYDSN_ON_HOLD
 					    && !bitnset(M_HOLD,
 							q->q_mailer->m_flags)
-#endif /* _FFR_NODELAYDSN_ON_HOLD */
+#endif
 					   )
 					{
 						if (msg_timeout ==
@@ -750,7 +750,7 @@ clearenvelope(e, fullclear, rpool)
 	}
 #if _FFR_MILTER_ENHSC
 	e->e_enhsc[0] = '\0';
-#endif /* _FFR_MILTER_ENHSC */
+#endif
 }
 /*
 **  INITSYS -- initialize instantiation of system
@@ -891,7 +891,7 @@ settime(e)
 
 #ifndef O_APPEND
 # define O_APPEND	0
-#endif /* ! O_APPEND */
+#endif
 
 void
 openxscript(e)
@@ -905,7 +905,7 @@ openxscript(e)
 #if 0
 	if (e->e_lockfp == NULL && bitset(EF_INQUEUE, e->e_flags))
 		syserr("openxscript: job not locked");
-#endif /* 0 */
+#endif
 
 	p = queuename(e, XSCRPT_LETTER);
 	e->e_xfp = bfopen(p, FileMode, XscriptFileBufferSize,
@@ -949,7 +949,7 @@ closexscript(e)
 #if 0
 	if (e->e_lockfp == NULL)
 		syserr("closexscript: job not locked");
-#endif /* 0 */
+#endif
 	(void) sm_io_close(e->e_xfp, SM_TIME_DEFAULT);
 	e->e_xfp = NULL;
 }
