@@ -474,7 +474,6 @@ readcf(cfname, safe, e)
 						endtoken = 0;
 						break;
 
-
 #if 0
 /*
 **  This doesn't work yet as there are maps defined *after* the cf
@@ -1146,7 +1145,6 @@ fileclass(class, filename, fmt, ismap, safe, optional)
 			sm_dprintf("fileclass: F{%s}: map class %s, key %s, spec %s\n",
 				   mn, cl, key, spec);
 
-
 		/* parse map spec */
 		if (!map.map_class->map_parse(&map, spec))
 		{
@@ -1341,7 +1339,7 @@ dynclass(class, arg)
 	if (NULL == dynmap)
 	{
 		syserr("dynamic class: A{%s}: cannot enter", mn);
-		goto error;
+		goto error2;
 	}
 	dynmap->s_dynclass.map_class = &mapclass->s_mapclass;
 	dynmap->s_dynclass.map_mname = newstr(mn);
@@ -1378,6 +1376,7 @@ dynclass(class, arg)
 
   error:
 	dynmap->s_dynclass.map_mflags |= MF_OPENBOGUS;
+  error2:
 	sm_free(mn);
 	return;
 }
@@ -1533,7 +1532,6 @@ newmodmailer(rcpt, fl)
 **	Side Effects:
 **		enters the mailer into the mailer table.
 */
-
 
 void
 makemailer(line)
@@ -3898,7 +3896,6 @@ setoption(opt, val, safe, sticky, e)
 		WkTimeFact = atoi(val);
 		break;
 
-
 #if _FFR_QUEUE_GROUP_SORTORDER
 	/* coordinate this with makequeue() */
 #endif
@@ -5358,7 +5355,6 @@ static struct timeoutinfo
 	{ "queuereturn.dsn",		TO_QUEUERETURN_DSN		},
 	{ NULL,				0				},
 };
-
 
 static void
 settimeout(name, val, sticky)

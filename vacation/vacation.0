@@ -1,6 +1,4 @@
-VACATION(1)                 General Commands Manual                VACATION(1)
-
-
+[4mVACATION[24m(1)                 General Commands Manual                [4mVACATION[24m(1)
 
 [1mNAME[0m
        vacation - E-mail auto-responder
@@ -19,24 +17,24 @@ VACATION(1)                 General Commands Manual                VACATION(1)
 
               \eric, "|/usr/bin/vacation -a allman eric"
 
-       which  would  send  messages to you (assuming your login name was eric)
+       which would send messages to you (assuming your login  name  was  eric)
        and reply to any messages for ``eric'' or ``allman''.
 
        Available options:
 
        [1m-a [4m[22malias[0m
-              Handle messages for [4malias[24m in the same manner as  those  received
+              Handle  messages  for [4malias[24m in the same manner as those received
               for the user's login name.
 
        [1m-C [4m[22mcfpath[0m
-              Specify  pathname  of the sendmail configuration file.  This op-
+              Specify pathname of the sendmail configuration file.   This  op-
               tion is ignored if [1m-U [22mis specified.  This option defaults to the
               standard sendmail configuration file, located at /etc/mail/send-
               mail.cf on most systems.
 
-       [1m-d     [22mSend error/debug messages to stderr instead of  syslog.   Other-
-              wise,  fatal errors, such as calling [1mvacation [22mwith incorrect ar-
-              guments, or with non-existent [4mlogin[24ms, are logged in  the  system
+       [1m-d     [22mSend  error/debug  messages to stderr instead of syslog.  Other-
+              wise, fatal errors, such as calling [1mvacation [22mwith incorrect  ar-
+              guments,  or  with non-existent [4mlogin[24ms, are logged in the system
               log file, using syslog(8).  This should only be used on the com-
               mand line, not in your [4m.forward[24m file.
 
@@ -49,13 +47,13 @@ VACATION(1)                 General Commands Manual                VACATION(1)
               fore you modify your [4m.forward[24m file.  This should only be used on
               the command line, not in your [4m.forward[24m file.
 
-       [1m-I     [22mSame as [1m-i [22m(for backwards compatibility).  This should  only  be
+       [1m-I     [22mSame  as  [1m-i [22m(for backwards compatibility).  This should only be
               used on the command line, not in your [4m.forward[24m file.
 
        [1m-j     [22mRespond to the message regardless of whether the login is listed
               as a recipient for the message.  Do not use this flag unless you
-              are  sure  of the consequences.  For example, this will cause to
-              reply to mailing list messages which may result in removing  you
+              are sure of the consequences.  For example, this will  cause  to
+              reply  to mailing list messages which may result in removing you
               from the list.
 
        [1m-l     [22mList the content of the vacation database file including the ad-
@@ -105,17 +103,22 @@ VACATION(1)                 General Commands Manual                VACATION(1)
 
        [1mVacation  [22mreads  the  first  line  from  the  standard input for a UNIX
        ``From'' line to  determine  the  sender.   Sendmail(8)  includes  this
-       ``From'' line automatically.
+       ``From'' line automatically.  It also scans the headers for a ``Return-
+       Path:''  header  to  determine  the  sender.   If both are present, the
+       sender from the ``Return-Path:'' header is used.
 
        No message will be sent unless [4mlogin[24m (or an [4malias[24m supplied using the [1m-a[0m
        option) is part of either the ``To:'' or ``Cc:'' headers of  the  mail.
        No   messages   from   ``???-REQUEST'',  ``???-RELAY'',  ``???-OWNER'',
        ``OWNER-???'', ``Postmaster'', ``UUCP'', ``MAILER'',  or  ``MAILER-DAE-
        MON'' will be replied to (where these strings are case insensitive) nor
-       is a notification sent  if  a  ``Precedence:  bulk''  or  ``Precedence:
-       junk''  line is included in the mail headers.  The people who have sent
-       you messages are maintained as a db(3) or dbm(3) database in  the  file
-       [4m.vacation.db[24m or [4m.vacation.{dir,pag}[24m in your home directory.
+       is a notification sent if a ``Precedence: bulk'', ``Precedence: list'',
+       or  ``Precedence:  junk''  line is included in the mail headers.  Like-
+       wise, a response will not be sent if the headers contain a  ``Auto-Sub-
+       mitted:''  header with any value except ``no'' or a ``List-Id:'' header
+       is found.  The people who have sent you messages are  maintained  as  a
+       db(3)   or   dbm(3)   database  in  the  file  [4m.vacation.db[24m  or  [4m.vaca-[0m
+       [4mtion.{dir,pag}[24m in your home directory.
 
        [1mVacation [22mexpects a file [4m.vacation.msg[24m, in your home directory, contain-
        ing a message to be sent back to each sender.  It should be  an  entire
@@ -129,6 +132,10 @@ VACATION(1)                 General Commands Manual                VACATION(1)
               I am on vacation until July 22.  If you have something urgent,
               please contact Keith Bostic <bostic@CS.Berkeley.EDU>.
               --eric
+
+       Any  occurrence of the string ``$SUBJECT'' in [4m.vacation.msg[24m will be re-
+       placed by the first line of the subject of the message  that  triggered
+       the [1mvacation [22mprogram.
 
 [1mFILES[0m
        ~/.vacation.db    default database file for db(3)
@@ -144,6 +151,4 @@ VACATION(1)                 General Commands Manual                VACATION(1)
 [1mHISTORY[0m
        The [1mvacation [22mcommand appeared in 4.3BSD.
 
-
-
-                         $Date: 2013-11-22 20:52:02 $              VACATION(1)
+                         $Date: 2013-11-22 20:52:02 $              [4mVACATION[24m(1)

@@ -83,7 +83,6 @@ int		NextMacroId = 0240;	/* codes for long named macros */
 #define NEXTMACROID(mid)	((mid) + 1)
 #endif /* _FFR_MORE_MACROS */
 
-
 /*
 **  INITMACROS -- initialize the macro system
 **

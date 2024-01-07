@@ -639,7 +639,6 @@ rebuildaliases(map)
 	return success;
 }
 
-
 /*
 **  CONTLINE -- handle potential continuation line
 **

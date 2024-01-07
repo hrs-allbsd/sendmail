@@ -117,9 +117,11 @@ sortbysignature(xx, yy)
 
 	/* Let's avoid redoing the signature over and over again */
 	if (xx->q_signature == NULL)
-		xx->q_signature = hostsignature(xx->q_mailer, xx->q_host, xx->q_flags & QSECURE);
+		xx->q_signature = hostsignature(xx->q_mailer, xx->q_host,
+					QISSECURE(xx), NULL);
 	if (yy->q_signature == NULL)
-		yy->q_signature = hostsignature(yy->q_mailer, yy->q_host, yy->q_flags & QSECURE);
+		yy->q_signature = hostsignature(yy->q_mailer, yy->q_host,
+					QISSECURE(yy), NULL);
 	ret = strcmp(xx->q_signature, yy->q_signature);
 
 	/*
@@ -748,7 +750,7 @@ recipient(new, sendq, aliaslevel, e)
 		if (i == 0) /* equal */
 		{
 			/*
-			**  Sortbysignature() has said that the two have
+			**  sortbysignature() has said that the two have
 			**  equal MX RR's and the same user. Calling sameaddr()
 			**  now checks if the two hosts are as identical as the
 			**  MX RR's are (which might not be the case)
@@ -1599,7 +1601,6 @@ include(fname, forwarding, ctladdr, sendq, aliaslevel, e)
 		ev = sm_setevent(TimeOuts.to_fileopen, includetimeout, 0);
 	else
 		ev = NULL;
-
 
 	/* check for writable parent directory */
 	p = strrchr(fname, '/');

@@ -275,10 +275,10 @@ incbuflen(buflen)
 **
 **	Parameters:
 **		fp -- file to read.
-**		smtpmode -- if set, we are running SMTP: give an RFC821
-**			style message to say we are ready to collect
-**			input, and never ignore a single dot to mean
-**			end of message.
+**		smtpmode -- if >= SMTPMODE_LAX we are running SMTP:
+**			give an RFC821 style message to say we are
+**			ready to collect input, and never ignore
+**			a single dot to mean end of message.
 **		hdrp -- the location to stash the header.
 **		e -- the current envelope.
 **		rsetsize -- reset e_msgsize?
@@ -305,6 +305,10 @@ incbuflen(buflen)
 #define IS_DOTCR	3	/* read ".\r" at beginning of line */
 #define IS_CR		4	/* read a carriage return */
 
+/* hack to enhance readability of debug output */
+static const char *istates[] = { "NORM", "BOL", "DOT", "DOTCR", "CR" };
+#define ISTATE istates[istate]
+
 /* values for message state machine */
 #define MS_UFROM	0	/* reading Unix from line */
 #define MS_HEADER	1	/* reading message header */
@@ -314,7 +318,7 @@ incbuflen(buflen)
 void
 collect(fp, smtpmode, hdrp, e, rsetsize)
 	SM_FILE_T *fp;
-	bool smtpmode;
+	int smtpmode;
 	HDR **hdrp;
 	register ENVELOPE *e;
 	bool rsetsize;
@@ -340,12 +344,21 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 #if _FFR_REJECT_NUL_BYTE
 	bool hasNUL;		/* has at least one NUL input byte */
 #endif
+#if _FFR_BARE_LF
+	bool bare_lf = false;
+#endif
+
+#define SMTPMODE	(smtpmode >= SMTPMODE_LAX)
+#define SMTPMODE_STRICT	((smtpmode & SMTPMODE_CRLF) != 0)
+#if _FFR_BARE_LF
+# define SMTPMODE_NO_BARE_LF	((smtpmode & SMTPMODE_LF) != 0)
+#endif
 
 	df = NULL;
-	ignrdot = smtpmode ? false : IgnrDot;
+	ignrdot = SMTPMODE ? false : IgnrDot;
 
 	/* timeout for I/O functions is in milliseconds */
-	dbto = smtpmode ? ((int) TimeOuts.to_datablock * 1000)
+	dbto = SMTPMODE ? ((int) TimeOuts.to_datablock * 1000)
 			: SM_TIME_FOREVER;
 	sm_io_setinfo(fp, SM_IO_WHAT_TIMEOUT, &dbto);
 	old_rd_tmo = set_tls_rd_tmo(TimeOuts.to_datablock);
@@ -368,7 +381,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 	**  Tell ARPANET to go ahead.
 	*/
 
-	if (smtpmode)
+	if (SMTPMODE)
 		message("354 Enter mail, end with \".\" on a line by itself");
 
 	/* simulate an I/O timeout when used as sink */
@@ -392,7 +405,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 	for (;;)
 	{
 		if (tTd(30, 35))
-			sm_dprintf("top, istate=%d, mstate=%d\n", istate,
+			sm_dprintf("top, istate=%s, mstate=%d\n", ISTATE,
 				   mstate);
 		for (;;)
 		{
@@ -413,7 +426,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 
 					/* timeout? */
 					if (c == SM_IO_EOF && errno == EAGAIN
-					    && smtpmode)
+					    && SMTPMODE)
 					{
 						/*
 						**  Override e_message in
@@ -451,15 +464,21 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 					hasNUL = true;
 #endif
 				if (c == SM_IO_EOF)
-					goto readerr;
-				if (SevenBitInput)
+					goto readdone;
+				if (SevenBitInput ||
+				    bitset(EF_7BITBODY, e->e_flags))
 					c &= 0x7f;
 				else
 					HasEightBits |= bitset(0x80, c);
 			}
 			if (tTd(30, 94))
-				sm_dprintf("istate=%d, c=%c (0x%x)\n",
-					istate, (char) c, c);
+				sm_dprintf("istate=%s, c=%c (0x%x)\n",
+					ISTATE, (char) c, c);
+#if _FFR_BARE_LF
+			if ('\n' == c && SMTPMODE_NO_BARE_LF &&
+			    !(IS_CR == istate || IS_DOTCR == istate))
+				bare_lf = true;
+#endif
 			switch (istate)
 			{
 			  case IS_BOL:
@@ -471,8 +490,8 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 				break;
 
 			  case IS_DOT:
-				if (c == '\n' && !ignrdot)
-					goto readerr;
+				if (c == '\n' && !ignrdot && !SMTPMODE_STRICT)
+					goto readdone;
 				else if (c == '\r')
 				{
 					istate = IS_DOTCR;
@@ -494,7 +513,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 
 			  case IS_DOTCR:
 				if (c == '\n' && !ignrdot)
-					goto readerr;
+					goto readdone;
 				else
 				{
 					/* push back the ".\rx" */
@@ -533,7 +552,7 @@ collect(fp, smtpmode, hdrp, e, rsetsize)
 				istate = IS_CR;
 				continue;
 			}
-			else if (c == '\n')
+			else if (c == '\n' && !SMTPMODE_STRICT)
 				istate = IS_BOL;
 			else
 				istate = IS_NORM;
@@ -625,8 +644,8 @@ bufferchar:
 
 nextstate:
 		if (tTd(30, 35))
-			sm_dprintf("nextstate, istate=%d, mstate=%d, line=\"%s\"\n",
-				istate, mstate, buf);
+			sm_dprintf("nextstate, istate=%s, mstate=%d, line=\"%s\"\n",
+				ISTATE, mstate, buf);
 		switch (mstate)
 		{
 		  case MS_UFROM:
@@ -657,7 +676,7 @@ nextstate:
 
 				/* timeout? */
 				if (c == SM_IO_EOF && errno == EAGAIN
-				    && smtpmode)
+				    && SMTPMODE)
 				{
 					/*
 					**  Override e_message in
@@ -706,7 +725,7 @@ nextstate:
 				sm_dprintf("EOH\n");
 
 			if (headeronly)
-				goto readerr;
+				goto readdone;
 
 			df = collect_eoh(e, numhdrs, hdrslen);
 			if (df == NULL)
@@ -733,8 +752,8 @@ nextstate:
 		bp = buf;
 	}
 
-readerr:
-	if ((sm_io_eof(fp) && smtpmode) || sm_io_error(fp))
+readdone:
+	if ((sm_io_eof(fp) && SMTPMODE) || sm_io_error(fp))
 	{
 		const char *errmsg;
 
@@ -774,7 +793,7 @@ readerr:
 	}
 	else if (SuperSafe == SAFE_NO ||
 		 SuperSafe == SAFE_INTERACTIVE ||
-		 (SuperSafe == SAFE_REALLY_POSTMILTER && smtpmode))
+		 (SuperSafe == SAFE_REALLY_POSTMILTER && SMTPMODE))
 	{
 		/* skip next few clauses */
 		/* EMPTY */
@@ -895,6 +914,21 @@ readerr:
 		logsender(e, e->e_msgid);
 		e->e_flags &= ~EF_LOGSENDER;
 	}
+#if _FFR_BARE_LF
+	if (bare_lf)
+	{
+		e->e_flags |= EF_NO_BODY_RETN|EF_CLRQUEUE;
+		if (!bitset(EF_FATALERRS, e->e_flags))
+		{
+			e->e_status = "5.6.0";
+			usrerrenh(e->e_status,
+				"550 Bare linefeed (LF) not allowed");
+			if (LogLevel > 10)
+				sm_syslog(LOG_NOTICE, e->e_id,
+					"Bare linefeed (LF) not allowed");
+		}
+	}
+#endif /* _FFR_BARE_LF */
 
 	/* check for message too large */
 	if (bitset(EF_TOOBIG, e->e_flags))
@@ -980,7 +1014,7 @@ readerr:
 /*
 **  DFERROR -- signal error on writing the data file.
 **
-**	Called by collect().  Collect() always terminates the process
+**	Called by collect().  collect() always terminates the process
 **	immediately after calling dferror(), which means that the SMTP
 **	session will be terminated, which means that any error message
 **	issued by dferror must be a 421 error, as per RFC 821.

@@ -1030,7 +1030,6 @@ makelower_a(pp, rpool)
 	return orig;
 }
 
-
 #if 0
 makelower: Optimization for EAI case?
 
@@ -1175,7 +1174,6 @@ putline(l, mci)
 **	Side Effects:
 **		output of l to mci->mci_out.
 */
-
 
 #define PUTX(limit)							\
 	do								\
@@ -1423,7 +1421,6 @@ xunlink(f)
 **			buf containing a null string.
 **		buf otherwise.
 */
-
 
 char *
 sfgets(buf, siz, fp, timeout, during)
@@ -1799,9 +1796,7 @@ checkfd012(where)
 	for (i = 0; i < 3; i++)
 		fill_fd(i, where);
 }
-#endif /* XDEBUG */
 
-#if XDEBUG
 /*
 **  CHECKFDOPEN -- make sure file descriptor is open -- for extended debugging
 **
@@ -2773,7 +2768,6 @@ proc_list_drop(pid, st, other)
 			break;
 		}
 	}
-
 
 	if (type == PROC_CONTROL && WIFEXITED(st))
 	{
